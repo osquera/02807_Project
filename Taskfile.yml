@@ -14,4 +14,4 @@ tasks:
     desc: Downloads and saves all datasets locally
     deps: [sync]
     cmds:
-      - uv run python src/02807_project/data/loader.py
+      - uv run python src/02807_project/data_loader.py
