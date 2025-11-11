@@ -1,0 +1,32 @@
+# SA key file
+google-service-account-key.json
+# Data files
+data/
+# Virtual environment
+venv/
+.venv/
+*.pyc
+*.lock
+# macOS files
+.DS_Store
+# IDE files
+.idea/
+.vscode/
+# Logs
+*.log
+# Environment variables
+.env
+.env.*
+# Distribution / packaging
+*.egg-info/
+# Python bytecode and cache
+__pycache__/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+# Backup files
+*.bak
+# Hydra outputs and logs
+outputs/
+# Binaries and executables
+bin/

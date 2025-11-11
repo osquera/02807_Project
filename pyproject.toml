@@ -1,0 +1,52 @@
+[project]
+name = "student-project-template"
+version = "0.1.0"
+description = "Golden Image for Student Projects"
+readme = "README.md"
+requires-python = ">=3.12, <3.13"
+dependencies = [
+  # GAR private packages
+  "ai-models>=0.1.1",
+  "eegprep>=0.1.15",
+  # Third-party packages
+  "mne>=1.9.0",
+  "pandas>=2.2.3",
+  "torch==2.5.0+cu118",
+  "pytorch-lightning>=2.5.1.post0",
+  "scikit-learn>=1.6.1",
+  "wandb>=0.19.11",
+  "lightning>=2.5.1.post0",
+  "edfio>=0.4.9",
+  "keyrings-google-artifactregistry-auth>=1.1.2",
+]
+
+[tool.uv]
+# Google Artifact Registry for private packages
+[[tool.uv.index]]
+name = "ai-tools"
+url = "https://europe-west6-python.pkg.dev/braincapture-ai/ai-tools/simple/"
+type = "index"
+explicit = true
+authenticate = "always"
+
+[[tool.uv.index]]
+name = "cuml-cu12"
+url = "https://pypi.nvidia.com"
+type = "index"
+explicit = true
+
+[[tool.uv.index]]
+name = "torch-gpu"
+url = "https://download.pytorch.org/whl/cu118"
+type = "index"
+explicit = true
+
+[tool.uv.sources]
+eegprep   = { index = "ai-tools" }
+ai-models = { index = "ai-tools" }
+torch     = { index = "torch-gpu" }
+cuml-cu12 = { index = "cuml-cu12" }
+
+[build-system]
+requires    = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
