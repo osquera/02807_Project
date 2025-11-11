@@ -15,10 +15,12 @@ tasks:
     deps: [sync]
     cmds:
       - uv run python src/02807_project/data_loader.py
-  clean-data:
-    desc: Cleans the downloaded datasets by removing nulls, invalid ratings, and mapping review scores
+  setup-data:
+    desc: Complete data setup - syncs dependencies, downloads datasets, and cleans the data
+    deps: [sync]
     cmds:
-      - uv run python src/02807_project/data_cleaner.py
+      - task download-data
+      - task clean-data
   explore-data:
     desc: Explores both raw and cleaned datasets with statistics and descriptions
     cmds:
