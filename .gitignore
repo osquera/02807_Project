@@ -1,7 +1,7 @@
 # SA key file
 google-service-account-key.json
 # Data files
-data/
+data/*.csv
 # Virtual environment
 venv/
 .venv/

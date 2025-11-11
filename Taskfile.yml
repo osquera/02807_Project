@@ -10,3 +10,8 @@ tasks:
     desc: Syncs uv artifacts
     cmds:
       - uv sync
+  download-data:
+    desc: Downloads and saves all datasets locally
+    deps: [sync]
+    cmds:
+      - uv run python src/02807_project/data/loader.py
