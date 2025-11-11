@@ -15,3 +15,7 @@ tasks:
     deps: [sync]
     cmds:
       - uv run python src/02807_project/data_loader.py
+  explore-data:
+    desc: Explores the downloaded datasets with statistics and descriptions
+    cmds:
+      - uv run python src/02807_project/explore_data.py

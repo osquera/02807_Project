@@ -18,3 +18,8 @@ To run the data download task (downloads and saves datasets locally):
 ```
 task download-data
 ```
+
+To run the data exploration task (provides statistics and descriptions of the datasets):
+```
+task explore-data
+```

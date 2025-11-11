@@ -27,6 +27,7 @@ large_movie_dataset = pl.scan_csv(
     ignore_errors=True,
     infer_schema_length=100000,
     quote_char=None,
+    schema_overrides={"User_Id": pl.Int64, "Movie_Name": pl.Utf8, "Rating": pl.Float64, "Genre": pl.Utf8},
 )
 large_movie_dataset.sink_csv(RAW_LOCATION / "large_movie_dataset.csv")
 (RAW_LOCATION / "large_movie_dataset.raw.csv").unlink()
@@ -51,6 +52,16 @@ rotten_tomatoes_dataset = pl.scan_csv(
     ignore_errors=True,
     infer_schema_length=100000,
     quote_char=None,
+    schema_overrides={
+        "rotten_tomatoes_link": pl.Utf8,
+        "critic_name": pl.Utf8,
+        "top_critic": pl.Boolean,
+        "publisher_name": pl.Utf8,
+        "review_type": pl.Categorical,
+        "review_score": pl.Categorical,
+        "review_date": pl.Utf8,  # Keep as string for now, can parse later
+        "review_content": pl.Utf8,
+    },
 )
 rotten_tomatoes_dataset.sink_csv(RAW_LOCATION / "rotten_tomatoes_critic_reviews.csv")
 (RAW_LOCATION / "rotten_tomatoes_critic_reviews.raw.csv").unlink()
@@ -74,6 +85,15 @@ actors_dataset = pl.scan_csv(
     ignore_errors=True,
     infer_schema_length=100000,
     quote_char=None,
+    schema_overrides={
+        "Actor": pl.Utf8,
+        "ActorID": pl.Utf8,
+        "Film": pl.Utf8,
+        "Year": pl.Int64,
+        "Votes": pl.Int64,
+        "Rating": pl.Float64,
+        "FilmID": pl.Utf8,
+    },
 )
 actors_dataset.sink_csv(RAW_LOCATION / "actorfilms.csv")
 (RAW_LOCATION / "actorfilms.raw.csv").unlink()

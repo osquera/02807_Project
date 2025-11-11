@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12, <3.13"
 dependencies = [
     "kagglehub[polars-datasets]>=0.3.13",
+    "loguru>=0.7.3",
 ]
 
 [dependency-groups]
