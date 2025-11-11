@@ -1,9 +1,5 @@
 version: '3'
 
-vars:
-  svc_key: ./google-service-account-key.json
-  pwd: '{{ .PWD }}'
-
 tasks:
   hello:
     desc: Initial task for setup
@@ -11,12 +7,6 @@ tasks:
       - echo "Successfully installed Taskfile"
   # INFRA TASKS
   sync:
-    desc: Auths the GCP service account and syncs uv artifacts
+    desc: Syncs uv artifacts
     cmds:
-      - bash scripts/gcloud_auth.sh
       - uv sync
-
-help:
-  desc: Show this help message
-  cmds:
-    - task --list
