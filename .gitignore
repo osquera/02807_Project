@@ -2,7 +2,7 @@
 google-service-account-key.json
 # Data files
 data/*.csv
-data/raw/*.csv
+data/**/*.csv
 src/02807_project/data/raw/*.csv
 # Virtual environment
 venv/

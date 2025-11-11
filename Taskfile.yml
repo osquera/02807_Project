@@ -15,7 +15,19 @@ tasks:
     deps: [sync]
     cmds:
       - uv run python src/02807_project/data_loader.py
-  explore-data:
-    desc: Explores the downloaded datasets with statistics and descriptions
+  clean-data:
+    desc: Cleans the downloaded datasets by removing nulls, invalid ratings, and mapping review scores
     cmds:
-      - uv run python src/02807_project/explore_data.py
+      - uv run python src/02807_project/data_cleaner.py
+  explore-data:
+    desc: Explores both raw and cleaned datasets with statistics and descriptions
+    cmds:
+      - uv run python src/02807_project/explore_data.py --version both
+  explore-data-raw:
+    desc: Explores only the raw datasets with statistics and descriptions
+    cmds:
+      - uv run python src/02807_project/explore_data.py --version raw
+  explore-data-clean:
+    desc: Explores only the cleaned datasets with statistics and descriptions
+    cmds:
+      - uv run python src/02807_project/explore_data.py --version clean

@@ -52,6 +52,7 @@ rotten_tomatoes_dataset = pl.scan_csv(
     ignore_errors=True,
     infer_schema_length=100000,
     quote_char=None,
+    try_parse_dates=True,
     schema_overrides={
         "rotten_tomatoes_link": pl.Utf8,
         "critic_name": pl.Utf8,
@@ -59,7 +60,7 @@ rotten_tomatoes_dataset = pl.scan_csv(
         "publisher_name": pl.Utf8,
         "review_type": pl.Categorical,
         "review_score": pl.Categorical,
-        "review_date": pl.Utf8,  # Keep as string for now, can parse later
+        "review_date": pl.Datetime,
         "review_content": pl.Utf8,
     },
 )

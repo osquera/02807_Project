@@ -1,9 +1,11 @@
+import argparse
 from pathlib import Path
 
 import polars as pl
 from helpers.logger import logger
 
 RAW_LOCATION = Path("data/raw")
+CLEAN_LOCATION = Path("data/clean")
 
 
 def explore_dataset(name: str, file_path: Path) -> None:
@@ -14,16 +16,30 @@ def explore_dataset(name: str, file_path: Path) -> None:
     if "large_movie" in str(file_path):
         schema_overrides = {"User_Id": pl.Int64, "Movie_Name": pl.Utf8, "Rating": pl.Float32, "Genre": pl.Utf8}
     elif "rotten_tomatoes" in str(file_path):
-        schema_overrides = {
-            "rotten_tomatoes_link": pl.Utf8,
-            "critic_name": pl.Utf8,
-            "top_critic": pl.Boolean,
-            "publisher_name": pl.Utf8,
-            "review_type": pl.Categorical,
-            "review_score": pl.Categorical,
-            "review_date": pl.Datetime,
-            "review_content": pl.Utf8,
-        }
+        if "clean" in str(file_path):
+            # Clean version has numeric review scores
+            schema_overrides = {
+                "rotten_tomatoes_link": pl.Utf8,
+                "critic_name": pl.Utf8,
+                "top_critic": pl.Boolean,
+                "publisher_name": pl.Utf8,
+                "review_type": pl.Categorical,
+                "review_score": pl.Utf8,
+                "review_score_numeric": pl.Float64,
+                "review_date": pl.Datetime,
+                "review_content": pl.Utf8,
+            }
+        else:
+            schema_overrides = {
+                "rotten_tomatoes_link": pl.Utf8,
+                "critic_name": pl.Utf8,
+                "top_critic": pl.Boolean,
+                "publisher_name": pl.Utf8,
+                "review_type": pl.Categorical,
+                "review_score": pl.Categorical,
+                "review_date": pl.Datetime,
+                "review_content": pl.Utf8,
+            }
     elif "actorfilms" in str(file_path):
         schema_overrides = {
             "Actor": pl.Utf8,
@@ -42,7 +58,10 @@ def explore_dataset(name: str, file_path: Path) -> None:
     # Collect a small sample for exploration
     df_sample = df_lazy.limit(1000).collect()
 
-    # Basic statistics
+    # Get full dataset size
+    total_rows = df_lazy.select(pl.len()).collect().item()
+    logger.info(f"📊 Dataset size: {total_rows:,} total rows")
+    logger.info(f"🔍 Sample size: {df_sample.shape[0]} rows x {df_sample.shape[1]} columns")
     logger.info("Basic statistics:")
     logger.info(str(df_sample.describe()))
 
@@ -56,11 +75,36 @@ def explore_dataset(name: str, file_path: Path) -> None:
 
 
 if __name__ == "__main__":
-    datasets = [
-        ("Large Movie Dataset", RAW_LOCATION / "large_movie_dataset.csv"),
-        ("Rotten Tomatoes Reviews", RAW_LOCATION / "rotten_tomatoes_critic_reviews.csv"),
-        ("Actor Films", RAW_LOCATION / "actorfilms.csv"),
-    ]
+    parser = argparse.ArgumentParser(description="Explore datasets")
+    parser.add_argument(
+        "--version",
+        choices=["raw", "clean", "both"],
+        default="both",
+        help="Which version of the data to explore (default: both)",
+    )
+    args = parser.parse_args()
+
+    if args.version == "raw":
+        datasets = [
+            ("Large Movie Dataset (Raw)", RAW_LOCATION / "large_movie_dataset.csv"),
+            ("Rotten Tomatoes Reviews (Raw)", RAW_LOCATION / "rotten_tomatoes_critic_reviews.csv"),
+            ("Actor Films (Raw)", RAW_LOCATION / "actorfilms.csv"),
+        ]
+    elif args.version == "clean":
+        datasets = [
+            ("Large Movie Dataset (Clean)", CLEAN_LOCATION / "large_movie_dataset_clean.csv"),
+            ("Rotten Tomatoes Reviews (Clean)", CLEAN_LOCATION / "rotten_tomatoes_critic_reviews_clean.csv"),
+            ("Actor Films (Clean)", CLEAN_LOCATION / "actorfilms_clean.csv"),
+        ]
+    else:  # both
+        datasets = [
+            ("Large Movie Dataset (Raw)", RAW_LOCATION / "large_movie_dataset.csv"),
+            ("Large Movie Dataset (Clean)", CLEAN_LOCATION / "large_movie_dataset_clean.csv"),
+            ("Rotten Tomatoes Reviews (Raw)", RAW_LOCATION / "rotten_tomatoes_critic_reviews.csv"),
+            ("Rotten Tomatoes Reviews (Clean)", CLEAN_LOCATION / "rotten_tomatoes_critic_reviews_clean.csv"),
+            ("Actor Films (Raw)", RAW_LOCATION / "actorfilms.csv"),
+            ("Actor Films (Clean)", CLEAN_LOCATION / "actorfilms_clean.csv"),
+        ]
 
     for name, path in datasets:
         if path.exists():
