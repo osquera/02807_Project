@@ -4,7 +4,7 @@ from pathlib import Path
 import kagglehub
 import polars as pl
 
-RAW_LOCATION = Path(__file__).parent / "raw"
+RAW_LOCATION = Path("data/raw")
 RAW_LOCATION.mkdir(parents=True, exist_ok=True)
 
 # Load the latest version
