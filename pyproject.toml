@@ -4,4 +4,71 @@ version = "0.1.0"
 description = ""
 readme = "README.md"
 requires-python = ">=3.12, <3.13"
-dependencies = []
+dependencies = [
+    "kagglehub[polars-datasets]>=0.3.13",
+    "loguru>=0.7.3",
+]
+
+[dependency-groups]
+dev = [
+    "debugpy>=1.8.17",
+    "ruff>=0.14.4",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+exclude = [
+  "*.ipynb",
+  ".env",
+  ".git",
+  ".venv",
+  "__pypackages__",
+  "build",
+  "dist",
+  "env",
+  "venv",
+]
+# Like Black, indent with spaces, rather than tabs.
+format.indent-style = "space"
+# Like Black, use double quotes for strings.
+format.quote-style = "double"
+# Like Black, automatically detect the appropriate line ending.
+format.line-ending = "auto"
+# Like Black, respect magic trailing commas.
+format.skip-magic-trailing-comma = false
+lint.select = [
+  "ALL", # include all the rules, including new ones
+]
+lint.ignore = [
+  "C901",    # ignore cyclomatic complexity
+  "COM812",
+  "D100",    # ignore missing docstring in public module
+  "D101",    # ignore missing docstring in public class
+  "D102",    # ignore missing docstring in public method
+  "D103",    # ignore missing docstring in public function
+  "D104",    # ignore undocumented public package definitions.
+  "D105",    # ignore missing docstring in public class definitions, for nested classes.
+  "D106",    # ignore missing docstring in public method
+  "D107",    # ignore missing docstring in public function
+  "D203",
+  "D213",
+  "ERA001",  # ignore outcommented code
+  "FBT001",  # Ignore bolean type in function expression
+  "FBT002",  # Ignore bolean type in function expression
+  "INP001",  # ignore checking for missing __init__.py files
+  "N807",    # ignore function cant be dunder
+  "PLR0911", # ignore too many return statements in function
+  "PLR0912", # ignore too many branches in function
+  "PLR0913", # ignore too many arguments in function
+  "PLR0915", # ignore too many statements in function
+  "PT009",   # ignore Checks for uses of assertion methods from the unittest module.
+  "S101",    # ignore checking for assert
+  "S602",    # ignore subprocess with shell=True
+  "T100",    # ignore Checks for the presence of debugger calls and imports.
+  "TD002",   # Ignore missing author in TODO comments.
+  "TD003",   # Ignore Missing issue link for this TODO
+  "TID252",  # ignore Prefer absolute imports over relative imports from parent modules.
+]
+# Allow unused variables when underscore-prefixed.
+lint.dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"

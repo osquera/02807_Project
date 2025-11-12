@@ -10,3 +10,26 @@ tasks:
     desc: Syncs uv artifacts
     cmds:
       - uv sync
+  download-data:
+    desc: Downloads and saves all datasets locally
+    deps: [sync]
+    cmds:
+      - uv run python src/02807_project/data_loader.py
+  setup-data:
+    desc: Complete data setup - syncs dependencies, downloads datasets, and cleans the data
+    deps: [sync]
+    cmds:
+      - task download-data
+      - task clean-data
+  explore-data:
+    desc: Explores both raw and cleaned datasets with statistics and descriptions
+    cmds:
+      - uv run python src/02807_project/explore_data.py --version both
+  explore-data-raw:
+    desc: Explores only the raw datasets with statistics and descriptions
+    cmds:
+      - uv run python src/02807_project/explore_data.py --version raw
+  explore-data-clean:
+    desc: Explores only the cleaned datasets with statistics and descriptions
+    cmds:
+      - uv run python src/02807_project/explore_data.py --version clean
