@@ -15,6 +15,14 @@ tasks:
     deps: [sync]
     cmds:
       - uv run python src/02807_project/data_loader.py
+  clean-data:
+    desc: Cleans the downloaded datasets by removing nulls, invalid ratings, and mapping review scores
+    cmds:
+      - uv run python src/02807_project/data_cleaner.py
+  scrape-rt-movies:
+    desc: Scrapes Rotten Tomatoes movie titles and descriptions from unique movie IDs
+    cmds:
+      - uv run python src/02807_project/scrape_rt_movies.py
   setup-data:
     desc: Complete data setup - syncs dependencies, downloads datasets, and cleans the data
     deps: [sync]

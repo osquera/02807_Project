@@ -38,6 +38,11 @@ task clean-data
 ```
 Cleans the downloaded datasets by removing nulls, invalid ratings, and mapping review scores to numeric values.
 
+```
+task scrape-rt-movies
+```
+Scrapes movie titles and descriptions from Rotten Tomatoes using the movie IDs from the reviews dataset. Uses 10 concurrent workers with rate limiting and supports resuming if interrupted. Creates `rotten_tomatoes_movie_details.csv` in `data/raw/`.
+
 ### Data Exploration Tasks
 
 **Explore all datasets (raw and cleaned):**
