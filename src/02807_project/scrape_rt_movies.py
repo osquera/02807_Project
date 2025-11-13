@@ -2,9 +2,10 @@
 
 This script scrapes movie details from Rotten Tomatoes using the movie IDs
 from the rotten_tomatoes_critic_reviews dataset. It uses concurrent workers
-with rate limiting and resumability support.
+with rate limiting and resumability support. Supports retrying failed scrapes.
 """
 
+import argparse
 import asyncio
 import csv
 from pathlib import Path
@@ -25,9 +26,9 @@ PROGRESS_FILE = RAW_LOCATION / ".scrape_progress.txt"
 BASE_URL = "https://www.rottentomatoes.com/"
 
 # Scraping parameters
-MAX_WORKERS = 10
-REQUEST_DELAY = 0.5  # seconds between requests per worker (start aggressive)
-MAX_RETRIES = 3
+MAX_WORKERS = 5
+REQUEST_DELAY = 1.0  # seconds between requests per worker (start aggressive)
+MAX_RETRIES = 5
 TIMEOUT = 30.0  # seconds
 HTTP_TOO_MANY_REQUESTS = 429  # Rate limit status code
 
@@ -249,6 +250,47 @@ def load_scraped_movies() -> set[str]:
         return set()
 
 
+def update_retry_results(new_results: list[MovieDetails]) -> None:
+    """Update existing CSV file with retry results, replacing failed entries.
+
+    Args:
+        new_results: List of newly scraped movie details
+
+    """
+    if not OUTPUT_FILE.exists():
+        logger.warning("Output file doesn't exist for retry update")
+        return
+
+    try:
+        # Load existing data
+        df = pl.read_csv(OUTPUT_FILE)
+
+        # Create a mapping of movie_id to new results
+        result_map = {result["rotten_tomatoes_link"]: result for result in new_results}
+
+        # Update the dataframe
+        updated_rows = []
+        for row in df.iter_rows(named=True):
+            movie_id = row["rotten_tomatoes_link"]
+            if movie_id in result_map:
+                # Replace with new result
+                updated_rows.append(result_map[movie_id])
+            else:
+                # Keep existing row
+                updated_rows.append(row)
+
+        # Convert back to DataFrame and save
+        updated_df = pl.DataFrame(updated_rows)
+        updated_df.write_csv(OUTPUT_FILE)
+
+        successful_updates = sum(1 for result in new_results if result["scrape_status"] == "success")
+        logger.info(f"💾 Updated {len(new_results)} entries in {OUTPUT_FILE} ({successful_updates} successful)")
+
+    except Exception as e:
+        logger.error(f"Failed to update retry results: {e}")
+        raise
+
+
 def save_results(results: list[MovieDetails], mode: str = "a") -> None:
     """Save scraping results to CSV.
 
@@ -273,18 +315,19 @@ def save_results(results: list[MovieDetails], mode: str = "a") -> None:
     logger.info(f"💾 Saved {len(results)} results to {OUTPUT_FILE}")
 
 
-async def scrape_all_movies(movie_ids: list[str]) -> None:
+async def scrape_all_movies(movie_ids: list[str], retry_mode: bool = False) -> None:
     """Scrape all movies with concurrent workers.
 
     Args:
         movie_ids: List of unique movie IDs to scrape
+        retry_mode: If True, update existing entries instead of appending
 
     """
     rate_limiter = RateLimiter(REQUEST_DELAY)
     semaphore = asyncio.Semaphore(MAX_WORKERS)
 
-    # Initialize output file if it doesn't exist
-    if not OUTPUT_FILE.exists():
+    # Initialize output file if it doesn't exist (only for fresh scrapes)
+    if not retry_mode and not OUTPUT_FILE.exists():
         save_results([], mode="w")
 
     headers = {
@@ -314,13 +357,17 @@ async def scrape_all_movies(movie_ids: list[str]) -> None:
                     f"Progress: {completed}/{total} ({completed / total * 100:.1f}%) - {success_count} successful"
                 )
 
-            # Save batch periodically
-            if len(results_batch) >= batch_size:
+            # In retry mode, don't save batches - collect all results first
+            if not retry_mode and len(results_batch) >= batch_size:
                 save_results(results_batch, mode="a")
                 results_batch = []
 
-        # Save remaining results
-        if results_batch:
+        # Handle results based on mode
+        if retry_mode:
+            # In retry mode, update existing entries
+            update_retry_results(results_batch)
+        elif results_batch:
+            # In fresh scrape mode, save remaining results
             save_results(results_batch, mode="a")
 
 
@@ -355,19 +402,57 @@ def get_unique_movie_ids() -> list[str]:
     return remaining_ids
 
 
-async def main() -> None:
-    """Entry point for the scraper."""
+def get_failed_movie_ids() -> list[str]:
+    """Load movie IDs that failed scraping from the output CSV.
+
+    Returns:
+        List of movie IDs that failed to scrape
+
+    """
+    if not OUTPUT_FILE.exists():
+        logger.warning(f"Output file {OUTPUT_FILE} not found, no failed movies to retry")
+        return []
+
+    logger.info(f"📂 Loading failed movie IDs from {OUTPUT_FILE}")
+
+    try:
+        df = pl.read_csv(OUTPUT_FILE)
+        # Filter for entries where scrape_status is not "success"
+        failed_df = df.filter(pl.col("scrape_status") != "success")
+        failed_ids = failed_df["rotten_tomatoes_link"].to_list()
+
+        logger.info(f"Found {len(failed_ids)} failed movie IDs to retry")
+
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Could not load failed movie IDs: {e}")
+        return []
+
+    return failed_ids
+
+
+async def main(retry_failed: bool = False) -> None:
+    """Entry point for the scraper.
+
+    Args:
+        retry_failed: If True, retry scraping movies that previously failed
+
+    """
     logger.info("🚀 Starting Rotten Tomatoes scraper")
     logger.info(f"Configuration: {MAX_WORKERS} workers, {REQUEST_DELAY}s delay per worker")
 
     try:
-        movie_ids = get_unique_movie_ids()
+        if retry_failed:
+            logger.info("🔄 Retry mode: Re-scraping failed movies")
+            movie_ids = get_failed_movie_ids()
+        else:
+            logger.info("🆕 Fresh scrape mode: Scraping new movies")
+            movie_ids = get_unique_movie_ids()
 
         if not movie_ids:
             logger.info("✅ No movies to scrape - all done!")
             return
 
-        await scrape_all_movies(movie_ids)
+        await scrape_all_movies(movie_ids, retry_mode=retry_failed)
 
         logger.info("🎉 Scraping completed!")
 
@@ -389,4 +474,8 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description="Scrape Rotten Tomatoes movie details")
+    parser.add_argument("--retry-failed", action="store_true", help="Retry scraping movies that previously failed")
+    args = parser.parse_args()
+
+    asyncio.run(main(retry_failed=args.retry_failed))

@@ -23,6 +23,10 @@ tasks:
     desc: Scrapes Rotten Tomatoes movie titles and descriptions from unique movie IDs
     cmds:
       - uv run python src/02807_project/scrape_rt_movies.py
+  retry-failed-scrapes:
+    desc: Retries scraping movies that previously failed
+    cmds:
+      - uv run python src/02807_project/scrape_rt_movies.py --retry-failed
   setup-data:
     desc: Complete data setup - syncs dependencies, downloads datasets, and cleans the data
     deps: [sync]
