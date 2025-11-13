@@ -12,6 +12,7 @@ MAX_RATING = 10.0
 MIN_RATING = 0.0
 MIN_YEAR = 1900
 MAX_YEAR = 2030
+YEAR_LENGTH = 4  # Length of valid year strings
 
 # Mapping for Rotten Tomatoes review scores
 REVIEW_SCORE_MAPPING = {
@@ -103,6 +104,57 @@ def clean_rotten_tomatoes_dataset() -> None:
     logger.info(f"✅ Saved cleaned dataset to {clean_path}")
 
 
+def clean_rotten_tomatoes_movie_details() -> None:
+    """Clean the scraped Rotten Tomatoes movie details dataset."""
+    logger.info("🧹 Cleaning Rotten Tomatoes Movie Details...")
+
+    raw_path = RAW_LOCATION / "rotten_tomatoes_movie_details.csv"
+    clean_path = CLEAN_LOCATION / "rotten_tomatoes_movie_details_clean.csv"
+
+    if not raw_path.exists():
+        logger.warning("Raw Rotten Tomatoes movie details not found, skipping")
+        return
+
+    df = pl.scan_csv(
+        raw_path,
+        schema_overrides={
+            "rotten_tomatoes_link": pl.Utf8,
+            "title": pl.Utf8,
+            "description": pl.Utf8,
+            "release_year": pl.Utf8,  # Keep as string for validation
+            "scrape_status": pl.Utf8,
+        },
+        ignore_errors=True,
+    )
+
+    # Clean: keep only successful scrapes, validate data
+    df_clean = (
+        df.filter(pl.col("scrape_status") == "success")
+        .filter(pl.col("rotten_tomatoes_link").is_not_null())
+        .filter(pl.col("title").is_not_null())
+        .with_columns(
+            # Clean release year: ensure it's a valid 4-digit year
+            pl.when(
+                (pl.col("release_year").is_not_null())
+                & (pl.col("release_year").str.len_chars() == YEAR_LENGTH)
+                & (pl.col("release_year").str.contains(r"^\d{4}$"))
+                & (pl.col("release_year").cast(pl.Int64, strict=False).is_between(MIN_YEAR, MAX_YEAR))
+            )
+            .then(pl.col("release_year"))
+            .otherwise(None)
+            .alias("release_year")
+        )
+        .with_columns(
+            # Clean description: remove excessive whitespace
+            pl.col("description").str.strip_chars().str.replace_all(r"\s+", " ", literal=False).alias("description")
+        )
+        .drop("scrape_status")  # No longer needed after filtering
+    )
+
+    df_clean.sink_csv(clean_path)
+    logger.info(f"✅ Saved cleaned movie details to {clean_path}")
+
+
 def clean_actorfilms_dataset() -> None:
     """Clean the actor films dataset."""
     logger.info("🧹 Cleaning Actor Films Dataset...")
@@ -148,6 +200,7 @@ if __name__ == "__main__":
 
     clean_large_movie_dataset()
     clean_rotten_tomatoes_dataset()
+    clean_rotten_tomatoes_movie_details()
     clean_actorfilms_dataset()
 
     logger.info("🎉 Data cleaning completed!")

@@ -16,7 +16,7 @@ tasks:
     cmds:
       - uv run python src/02807_project/data_loader.py
   clean-data:
-    desc: Cleans the downloaded datasets by removing nulls, invalid ratings, and mapping review scores
+    desc: Cleans the downloaded datasets by removing nulls, invalid ratings, and mapping review scores. Also cleans scraped Rotten Tomatoes movie details.
     cmds:
       - uv run python src/02807_project/data_cleaner.py
   scrape-rt-movies:
