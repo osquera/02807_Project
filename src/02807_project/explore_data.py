@@ -16,7 +16,24 @@ def explore_dataset(name: str, file_path: Path) -> None:
     if "large_movie" in str(file_path):
         schema_overrides = {"User_Id": pl.Int64, "Movie_Name": pl.Utf8, "Rating": pl.Float32, "Genre": pl.Utf8}
     elif "rotten_tomatoes" in str(file_path):
-        if "clean" in str(file_path):
+        if "movie_details" in str(file_path):
+            # Scraped movie details
+            if "clean" in str(file_path):
+                schema_overrides = {
+                    "rotten_tomatoes_link": pl.Utf8,
+                    "title": pl.Utf8,
+                    "description": pl.Utf8,
+                    "release_year": pl.Utf8,
+                }
+            else:
+                schema_overrides = {
+                    "rotten_tomatoes_link": pl.Utf8,
+                    "title": pl.Utf8,
+                    "description": pl.Utf8,
+                    "release_year": pl.Utf8,
+                    "scrape_status": pl.Utf8,
+                }
+        elif "clean" in str(file_path):
             # Clean version has numeric review scores
             schema_overrides = {
                 "rotten_tomatoes_link": pl.Utf8,
@@ -88,12 +105,14 @@ if __name__ == "__main__":
         datasets = [
             ("Large Movie Dataset (Raw)", RAW_LOCATION / "large_movie_dataset.csv"),
             ("Rotten Tomatoes Reviews (Raw)", RAW_LOCATION / "rotten_tomatoes_critic_reviews.csv"),
+            ("Rotten Tomatoes Movie Details (Raw)", RAW_LOCATION / "rotten_tomatoes_movie_details.csv"),
             ("Actor Films (Raw)", RAW_LOCATION / "actorfilms.csv"),
         ]
     elif args.version == "clean":
         datasets = [
             ("Large Movie Dataset (Clean)", CLEAN_LOCATION / "large_movie_dataset_clean.csv"),
             ("Rotten Tomatoes Reviews (Clean)", CLEAN_LOCATION / "rotten_tomatoes_critic_reviews_clean.csv"),
+            ("Rotten Tomatoes Movie Details (Clean)", CLEAN_LOCATION / "rotten_tomatoes_movie_details_clean.csv"),
             ("Actor Films (Clean)", CLEAN_LOCATION / "actorfilms_clean.csv"),
         ]
     else:  # both
@@ -102,6 +121,8 @@ if __name__ == "__main__":
             ("Large Movie Dataset (Clean)", CLEAN_LOCATION / "large_movie_dataset_clean.csv"),
             ("Rotten Tomatoes Reviews (Raw)", RAW_LOCATION / "rotten_tomatoes_critic_reviews.csv"),
             ("Rotten Tomatoes Reviews (Clean)", CLEAN_LOCATION / "rotten_tomatoes_critic_reviews_clean.csv"),
+            ("Rotten Tomatoes Movie Details (Raw)", RAW_LOCATION / "rotten_tomatoes_movie_details.csv"),
+            ("Rotten Tomatoes Movie Details (Clean)", CLEAN_LOCATION / "rotten_tomatoes_movie_details_clean.csv"),
             ("Actor Films (Raw)", RAW_LOCATION / "actorfilms.csv"),
             ("Actor Films (Clean)", CLEAN_LOCATION / "actorfilms_clean.csv"),
         ]

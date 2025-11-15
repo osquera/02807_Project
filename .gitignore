@@ -3,6 +3,8 @@ google-service-account-key.json
 # Data files
 data/*.csv
 data/**/*.csv
+!data/raw/rotten_tomatoes_movie_details.csv
+!data/clean/rotten_tomatoes_movie_details_clean.csv
 src/02807_project/data/raw/*.csv
 # Virtual environment
 venv/
