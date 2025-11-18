@@ -37,6 +37,7 @@ tasks:
     cmds:
       - task download-data
       - task clean-data
+      - task merge-data
   explore-data:
     desc: Explores both raw and cleaned datasets with statistics and descriptions
     cmds:
