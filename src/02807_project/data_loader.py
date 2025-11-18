@@ -26,7 +26,7 @@ large_movie_dataset = pl.scan_csv(
     truncate_ragged_lines=True,
     ignore_errors=True,
     infer_schema_length=100000,
-    quote_char=None,
+    quote_char='"',  # Enable quote handling for fields with commas
     schema_overrides={"User_Id": pl.Int64, "Movie_Name": pl.Utf8, "Rating": pl.Float64, "Genre": pl.Utf8},
 )
 large_movie_dataset.sink_csv(RAW_LOCATION / "large_movie_dataset.csv")
@@ -51,7 +51,7 @@ rotten_tomatoes_dataset = pl.scan_csv(
     truncate_ragged_lines=True,
     ignore_errors=True,
     infer_schema_length=100000,
-    quote_char=None,
+    quote_char='"',  # Enable quote handling for fields with commas
     try_parse_dates=True,
     schema_overrides={
         "rotten_tomatoes_link": pl.Utf8,
@@ -85,7 +85,7 @@ actors_dataset = pl.scan_csv(
     truncate_ragged_lines=True,
     ignore_errors=True,
     infer_schema_length=100000,
-    quote_char=None,
+    quote_char='"',  # Enable quote handling for fields with commas
     schema_overrides={
         "Actor": pl.Utf8,
         "ActorID": pl.Utf8,
