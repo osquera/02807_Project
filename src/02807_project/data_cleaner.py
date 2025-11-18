@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 import polars as pl
 from helpers.logger import logger
@@ -32,6 +33,80 @@ REVIEW_SCORE_MAPPING = {
 }
 
 
+def normalize_movie_title(title: str) -> str:
+    """Normalize movie title from Large Movie Dataset format.
+
+    Handles titles like:
+    - "Matrix, The (1999)" -> "The Matrix"
+    - "Bug's Life, A (1998)" -> "A Bug's Life"
+    - "Seventh Seal, The (Sjunde inseglet, Det) (1957)" -> "The Seventh Seal"
+
+    Args:
+        title: Original movie title
+
+    Returns:
+        Normalized title with articles moved to front and foreign titles removed
+
+    """
+    if not title or not isinstance(title, str):
+        return title
+
+    # Remove year patterns at the end: (1999) or [1999]
+    title_no_year = title
+
+    title_no_year = re.sub(r"\s*[\(\[]?\d{4}[\)\]]?\s*$", "", title).strip()
+
+    # Remove foreign language titles in parentheses
+    # Pattern: remove anything like "(Foreign Title)" or "(Foreign, Title)"
+    # Keep only the first part before any parenthetical foreign titles
+    title_no_foreign = re.sub(r"\s*\([^)]*[^\w\s)][^)]*\)", "", title_no_year).strip()
+
+    # Now handle article repositioning
+    # Common articles in multiple languages
+    articles = [
+        "the",
+        "a",
+        "an",  # English
+        "le",
+        "la",
+        "les",
+        "l'",  # French
+        "der",
+        "die",
+        "das",  # German
+        "il",
+        "lo",
+        "i",
+        "gli",  # Italian
+        "el",
+        "los",
+        "las",  # Spanish
+        "de",
+        "het",  # Dutch
+        "o",
+        "os",
+        "as",  # Portuguese
+        "det",
+        "den",
+    ]  # Scandinavian
+
+    # Check if title ends with ", Article"
+    for article in articles:
+        # Case-insensitive pattern: ", Article" at the end
+        pattern = rf",\s*{re.escape(article)}\s*$"
+        if re.search(pattern, title_no_foreign, re.IGNORECASE):
+            # Extract the article and move it to the front
+            parts = re.split(pattern, title_no_foreign, flags=re.IGNORECASE)
+            if len(parts) >= 1:
+                main_part = parts[0].strip()
+                # Capitalize the article properly
+                article_proper = article.capitalize() if article.lower() != "l'" else article
+                title_no_foreign = f"{article_proper} {main_part}"
+                break
+
+    return title_no_foreign.strip()
+
+
 def clean_large_movie_dataset() -> None:
     """Clean the large movie dataset."""
     logger.info("🧹 Cleaning Large Movie Dataset...")
@@ -47,13 +122,36 @@ def clean_large_movie_dataset() -> None:
         raw_path, schema_overrides={"User_Id": pl.Int64, "Movie_Name": pl.Utf8, "Rating": pl.Float64, "Genre": pl.Utf8}
     )
 
-    # Clean: drop nulls, filter valid ratings (0-10)
+    # Clean: drop nulls, filter valid ratings (0-10), normalize movie titles, extract year
     df_clean = (
         df.filter(pl.col("Rating").is_not_null())
         .filter(pl.col("User_Id").is_not_null())
         .filter(pl.col("Movie_Name").is_not_null())
         .filter(pl.col("Genre").is_not_null())
         .filter((pl.col("Rating") >= MIN_RATING) & (pl.col("Rating") <= MAX_RATING))
+        .with_columns(
+            [
+                # Extract year first (before removing it)
+                pl.col("Movie_Name")
+                .str.extract(r"[\(\[]?(\d{4})[\)\]]?\s*$", group_index=1)
+                .cast(pl.Int64, strict=False)
+                .alias("Release_Year"),
+                # Normalize title using native Polars string operations (much faster than map_elements)
+                pl.col("Movie_Name")
+                # Step 1: Remove year patterns at the end
+                .str.replace(r"\s*[\(\[]?\d{4}[\)\]]?\s*$", "")
+                # Step 2: Remove foreign language titles in parentheses
+                .str.replace_all(r"\s*\([^)]*[^\w\s)][^)]*\)", "")
+                # Step 3: Move articles to front - handle common English articles (case-insensitive)
+                .str.replace(r"(?i)^(.*),\s*(The|A|An)$", "$2 $1", literal=False)
+                # Step 4: Convert to lowercase for matching consistency
+                .str.to_lowercase()
+                # Step 5: Clean up whitespace
+                .str.strip_chars()
+                .str.replace_all(r"\s+", " ", literal=False)
+                .alias("Movie_Name_Normalized"),
+            ]
+        )
     )
 
     df_clean.sink_csv(clean_path)

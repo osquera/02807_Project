@@ -156,18 +156,19 @@ def prepare_large_movie_dataset() -> pl.DataFrame:
         return pl.DataFrame()
 
     df = pl.read_csv(
-        path, schema_overrides={"User_Id": pl.Int64, "Movie_Name": pl.Utf8, "Rating": pl.Float64, "Genre": pl.Utf8}
+        path,
+        schema_overrides={
+            "User_Id": pl.Int64,
+            "Movie_Name": pl.Utf8,
+            "Rating": pl.Float64,
+            "Genre": pl.Utf8,
+            "Movie_Name_Normalized": pl.Utf8,
+            "Release_Year": pl.Int64,
+        },
     )
 
-    # Extract year from movie name
-    df = df.with_columns(
-        pl.col("Movie_Name").map_elements(extract_year_from_title, return_dtype=pl.Int64).alias("lm_year_from_title")
-    )
-
-    # Normalize title
-    df = df.with_columns(
-        pl.col("Movie_Name").map_elements(normalize_title, return_dtype=pl.Utf8).alias("title_normalized")
-    )
+    # Use the normalized title from the cleaned dataset
+    df = df.with_columns(pl.col("Movie_Name_Normalized").alias("title_normalized"))
 
     # Aggregate by movie (multiple users rated same movie)
     df_agg = df.group_by("title_normalized").agg(
@@ -177,7 +178,7 @@ def prepare_large_movie_dataset() -> pl.DataFrame:
             pl.col("Rating").alias("lm_ratings_list"),
             pl.col("User_Id").alias("lm_user_ids_list"),
             pl.col("Genre").first().alias("lm_genre"),
-            pl.col("lm_year_from_title").first().alias("lm_year_from_title"),
+            pl.col("Release_Year").first().alias("lm_release_year"),
             pl.len().alias("lm_rating_count"),
         ]
     )
@@ -302,8 +303,8 @@ def merge_all_datasets() -> None:
         year_columns.append(pl.col("rt_release_year"))
     if "af_year" in merged.columns:
         year_columns.append(pl.col("af_year"))
-    if "lm_year_from_title" in merged.columns:
-        year_columns.append(pl.col("lm_year_from_title"))
+    if "lm_release_year" in merged.columns:
+        year_columns.append(pl.col("lm_release_year"))
 
     if year_columns:
         merged = merged.with_columns(pl.coalesce(*year_columns).alias("release_year"))
