@@ -27,6 +27,10 @@ tasks:
     desc: Retries scraping movies that previously failed
     cmds:
       - uv run python src/02807_project/scrape_rt_movies.py --retry-failed
+  merge-data:
+    desc: Merges all cleaned datasets into a single comprehensive dataset using normalized movie titles
+    cmds:
+      - uv run python src/02807_project/merge_datasets.py
   setup-data:
     desc: Complete data setup - syncs dependencies, downloads datasets, and cleans the data
     deps: [sync]
