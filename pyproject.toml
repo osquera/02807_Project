@@ -9,13 +9,21 @@ dependencies = [
     "kagglehub[polars-datasets]>=0.3.13",
     "loguru>=0.7.3",
     "lxml>=6.0.2",
+    "matplotlib>=3.10.7",
+    "networkx>=3.5",
+    "numpy>=2.3.4",
+    "pandas>=2.3.3",
+    "pyamg>=5.3.0",
+    "scikit-learn>=1.7.2",
     "tenacity>=9.1.2",
 ]
 
 [dependency-groups]
 dev = [
     "debugpy>=1.8.17",
+    "ipython>=9.7.0",
     "ruff>=0.14.4",
+    "jupyter>=1.1.1",
 ]
 
 [tool.ruff]

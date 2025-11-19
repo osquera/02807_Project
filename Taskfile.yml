@@ -31,6 +31,10 @@ tasks:
     desc: Merges all cleaned datasets into a single comprehensive dataset using normalized movie titles
     cmds:
       - uv run python src/02807_project/merge_datasets.py
+  analyze-actor-network:
+    desc: Analyzes movie network based on shared actors using Girvan-Newman, Louvain, and Spectral Clustering
+    cmds:
+      - uv run python src/02807_project/analyze_actor_network.py
   setup-data:
     desc: Complete data setup - syncs dependencies, downloads datasets, and cleans the data
     deps: [sync]
