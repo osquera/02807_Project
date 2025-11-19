@@ -1,3 +1,4 @@
+import argparse
 from pathlib import Path
 
 import polars as pl
@@ -9,17 +10,6 @@ DATA_PATH = DATA_LOCATION / "large_movie_dataset_clean.csv"
 
 # Constants
 ITEMSET_LENGTH_TWO = 2
-
-# Analysis parameters - adjust these to tune the algorithm
-SAMPLE_SIZE = None  # Number of users to analyze (None = all users)
-MIN_RATING = 3.0  # Minimum rating to include (None = include all ratings)
-MIN_SUPPORT = 0.1  # Minimum support threshold for frequent itemsets (0.0 to 1.0)
-MIN_CONFIDENCE = 0.60  # Minimum confidence threshold for association rules (0.0 to 1.0)
-TOP_RULES_DISPLAY = 10  # Number of top rules to display
-
-# Test case parameters
-TEST_USER_ID = 1  # User ID to hold out for testing (None = no test case)
-TOP_RECOMMENDATIONS = 5  # Number of recommendations to generate for test user
 
 def create_user_movie_df(
     sample_size: int | None = None,
@@ -43,9 +33,8 @@ def create_user_movie_df(
 
     # Filter by minimum rating if specified
     if min_rating is not None:
-        df = df.filter(pl.col("Rating") >= min_rating)
-
         total_ratings = df.select(pl.len()).collect().item()
+        df = df.filter(pl.col("Rating") >= min_rating)
         filtered_ratings = df.select(pl.len()).collect().item()
         removed_ratings = total_ratings - filtered_ratings
         percentage = removed_ratings / total_ratings * 100
@@ -277,54 +266,120 @@ def get_recommendations_for_movies(
     ]).sort("avg_score", descending=True).head(top_n)
 
 
+def parse_args() -> argparse.Namespace:
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Frequent itemsets and association rules for movie recommendations"
+    )
+
+    # Data parameters
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        default=None,
+        help="Number of users to analyze (default: None = all users)"
+    )
+    parser.add_argument(
+        "--min-rating",
+        type=float,
+        default=3.0,
+        help="Minimum rating to include (default: 3.0)"
+    )
+
+    # Algorithm parameters
+    parser.add_argument(
+        "--min-support",
+        type=float,
+        default=0.1,
+        help="Minimum support threshold for frequent itemsets (default: 0.1)"
+    )
+    parser.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.60,
+        help="Minimum confidence threshold for association rules (default: 0.60)"
+    )
+
+    # Display parameters
+    parser.add_argument(
+        "--top-rules-display",
+        type=int,
+        default=10,
+        help="Number of top rules to display (default: 10)"
+    )
+
+    # Test case parameters
+    parser.add_argument(
+        "--test-user-id",
+        type=int,
+        default=1,
+        help="User ID to hold out for testing (default: 1)"
+    )
+    parser.add_argument(
+        "--top-recommendations",
+        type=int,
+        default=5,
+        help="Number of recommendations to generate for test user (default: 5)"
+    )
+    parser.add_argument(
+        "--no-test-user",
+        action="store_true",
+        help="Disable test user holdout"
+    )
+
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
+    args = parse_args()
+
     # Step 1: Load and prepare data
     logger.info("Creating user-movie dictionary from cleaned dataset")
     user_movies, test_user_movies = create_user_movie_df(
-        sample_size=SAMPLE_SIZE,
-        min_rating=MIN_RATING,
-        exclude_user=TEST_USER_ID
+        sample_size=args.sample_size,
+        min_rating=args.min_rating,
+        exclude_user=None if args.no_test_user else args.test_user_id
     )
 
     # Step 2: Find frequent itemsets using Apriori algorithm
     logger.info("Finding frequent itemsets")
-    itemsets = find_frequent_itemsets(user_movies, min_support=MIN_SUPPORT)
+    itemsets = find_frequent_itemsets(user_movies, min_support=args.min_support)
 
     # Step 3: Generate association rules from frequent itemsets
     logger.info("Generating association rules")
-    rules = generate_association_rules(itemsets, min_confidence=MIN_CONFIDENCE)
+    rules = generate_association_rules(itemsets, min_confidence=args.min_confidence)
 
     # Step 4: Sort rules by confidence, then by lift
     rules_sorted = rules.sort(["confidence", "lift"], descending=True) if len(rules) > 0 else rules
 
     if len(rules) > 0:
         # Display top rules
-        top_display = TOP_RULES_DISPLAY
         rules_display = rules_sorted.select(
             ["support", "confidence", "lift", "antecedents", "consequents"]
-        ).head(top_display)
-        logger.info(f"\nAssociation rules (top {top_display} by confidence):\n{rules_display}")
+        ).head(args.top_rules_display)
+        logger.info(f"\nAssociation rules (top {args.top_rules_display} by confidence):\n{rules_display}")
     else:
         logger.info("No association rules found with current thresholds")
 
     # Step 5: Test case - generate recommendations for held-out user
     if test_user_movies is not None and len(rules) > 0:
-        logger.info(f"Test Case: Generating recommendations for User {TEST_USER_ID}")
+        logger.info(f"Test Case: Generating recommendations for User {args.test_user_id}")
         logger.info(f"Test user watched {len(test_user_movies)} movies")
 
         # Generate recommendations based on their movies
         recommendations = get_recommendations_for_movies(
             test_user_movies,
             rules_sorted,
-            top_n=TOP_RECOMMENDATIONS
+            top_n=args.top_recommendations
         )
 
         if len(recommendations) > 0:
-            logger.info(f"Top {TOP_RECOMMENDATIONS} recommendations for User {TEST_USER_ID}:")
+            logger.info(f"Top {args.top_recommendations} recommendations for User {args.test_user_id}:")
             logger.info(f"\n{recommendations}")
 
             # Show which movies weren't in the test user's list (actual recommendations)
             already_watched = set(test_user_movies)
+            # Using set directly avoids is_in deprecation warning
             new_recs = recommendations.filter(
                 ~pl.col("movie").is_in(already_watched)
             )

@@ -14,6 +14,18 @@ To list all available tasks:
 task --list
 ```
 
+**Passing parameters to tasks:**
+
+Some tasks accept command-line arguments. Use `--` to separate task arguments from script arguments:
+```
+task run-frequent-items -- --min-support 0.15 --min-confidence 0.70
+```
+
+To see available parameters for a task:
+```
+task run-frequent-items -- --help
+```
+
 ### Data Management Tasks
 
 **Complete data setup (recommended for first-time setup):**
