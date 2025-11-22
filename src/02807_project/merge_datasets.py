@@ -39,9 +39,7 @@ def normalize_title(title: str) -> str:
     normalized = normalized.lower().strip()
 
     # Remove extra whitespace
-    normalized = re.sub(r"\s+", " ", normalized)
-
-    return normalized
+    return re.sub(r"\s+", " ", normalized)
 
 
 def extract_year_from_title(title: str) -> int | None:
@@ -62,7 +60,7 @@ def extract_year_from_title(title: str) -> int | None:
     if match:
         year = int(match.group(1))
         # Validate year is reasonable
-        if 1900 <= year <= 2030:
+        if 1900 <= year <= 2030:  # noqa: PLR2004
             return year
 
     return None
@@ -334,8 +332,8 @@ def merge_all_datasets() -> None:
     merged.write_csv(OUTPUT_FILE)
 
     # Print summary statistics
-    logger.info(f"🎉 Merge completed successfully!")
-    logger.info(f"📊 Final dataset statistics:")
+    logger.info("🎉 Merge completed successfully!")
+    logger.info("📊 Final dataset statistics:")
     logger.info(f"   Total movies: {len(merged):,}")
     logger.info(f"   Total columns: {len(merged.columns)}")
 
@@ -346,21 +344,21 @@ def merge_all_datasets() -> None:
 
     if "rotten_tomatoes_link" in merged.columns:
         rt_coverage = merged.filter(pl.col("rotten_tomatoes_link").is_not_null()).height
-        logger.info(f"   Movies with RT data: {rt_coverage:,} ({rt_coverage/len(merged)*100:.1f}%)")
+        logger.info(f"   Movies with RT data: {rt_coverage:,} ({rt_coverage / len(merged) * 100:.1f}%)")
         has_rt = True
 
     if "lm_movie_name_original" in merged.columns:
         lm_coverage = merged.filter(pl.col("lm_movie_name_original").is_not_null()).height
-        logger.info(f"   Movies with Large Movie data: {lm_coverage:,} ({lm_coverage/len(merged)*100:.1f}%)")
+        logger.info(f"   Movies with Large Movie data: {lm_coverage:,} ({lm_coverage / len(merged) * 100:.1f}%)")
         has_lm = True
 
     if "af_film_original" in merged.columns:
         af_coverage = merged.filter(pl.col("af_film_original").is_not_null()).height
-        logger.info(f"   Movies with Actor Films data: {af_coverage:,} ({af_coverage/len(merged)*100:.1f}%)")
+        logger.info(f"   Movies with Actor Films data: {af_coverage:,} ({af_coverage / len(merged) * 100:.1f}%)")
         has_af = True
 
     # Calculate intersection statistics
-    logger.info(f"\n📈 Data Completeness Statistics:")
+    logger.info("\n📈 Data Completeness Statistics:")
 
     # Movies in all three datasets
     if has_rt and has_lm and has_af:
@@ -369,7 +367,7 @@ def merge_all_datasets() -> None:
             & pl.col("lm_movie_name_original").is_not_null()
             & pl.col("af_film_original").is_not_null()
         ).height
-        logger.info(f"   Movies in ALL 3 datasets: {all_three:,} ({all_three/len(merged)*100:.1f}%)")
+        logger.info(f"   Movies in ALL 3 datasets: {all_three:,} ({all_three / len(merged) * 100:.1f}%)")
 
     # Movies in exactly two datasets
     if has_rt and has_lm:
@@ -378,7 +376,7 @@ def merge_all_datasets() -> None:
             & pl.col("lm_movie_name_original").is_not_null()
             & (pl.col("af_film_original").is_null() if has_af else True)
         ).height
-        logger.info(f"   Movies in RT + Large Movie only: {rt_and_lm:,} ({rt_and_lm/len(merged)*100:.1f}%)")
+        logger.info(f"   Movies in RT + Large Movie only: {rt_and_lm:,} ({rt_and_lm / len(merged) * 100:.1f}%)")
 
     if has_rt and has_af:
         rt_and_af = merged.filter(
@@ -386,7 +384,7 @@ def merge_all_datasets() -> None:
             & pl.col("af_film_original").is_not_null()
             & (pl.col("lm_movie_name_original").is_null() if has_lm else True)
         ).height
-        logger.info(f"   Movies in RT + Actor Films only: {rt_and_af:,} ({rt_and_af/len(merged)*100:.1f}%)")
+        logger.info(f"   Movies in RT + Actor Films only: {rt_and_af:,} ({rt_and_af / len(merged) * 100:.1f}%)")
 
     if has_lm and has_af:
         lm_and_af = merged.filter(
@@ -394,7 +392,9 @@ def merge_all_datasets() -> None:
             & pl.col("af_film_original").is_not_null()
             & (pl.col("rotten_tomatoes_link").is_null() if has_rt else True)
         ).height
-        logger.info(f"   Movies in Large Movie + Actor Films only: {lm_and_af:,} ({lm_and_af/len(merged)*100:.1f}%)")
+        logger.info(
+            f"   Movies in Large Movie + Actor Films only: {lm_and_af:,} ({lm_and_af / len(merged) * 100:.1f}%)"
+        )
 
     # Movies in only one dataset
     if has_rt:
@@ -403,7 +403,7 @@ def merge_all_datasets() -> None:
             & (pl.col("lm_movie_name_original").is_null() if has_lm else True)
             & (pl.col("af_film_original").is_null() if has_af else True)
         ).height
-        logger.info(f"   Movies in RT only: {rt_only:,} ({rt_only/len(merged)*100:.1f}%)")
+        logger.info(f"   Movies in RT only: {rt_only:,} ({rt_only / len(merged) * 100:.1f}%)")
 
     if has_lm:
         lm_only = merged.filter(
@@ -411,7 +411,7 @@ def merge_all_datasets() -> None:
             & (pl.col("rotten_tomatoes_link").is_null() if has_rt else True)
             & (pl.col("af_film_original").is_null() if has_af else True)
         ).height
-        logger.info(f"   Movies in Large Movie only: {lm_only:,} ({lm_only/len(merged)*100:.1f}%)")
+        logger.info(f"   Movies in Large Movie only: {lm_only:,} ({lm_only / len(merged) * 100:.1f}%)")
 
     if has_af:
         af_only = merged.filter(
@@ -419,10 +419,10 @@ def merge_all_datasets() -> None:
             & (pl.col("rotten_tomatoes_link").is_null() if has_rt else True)
             & (pl.col("lm_movie_name_original").is_null() if has_lm else True)
         ).height
-        logger.info(f"   Movies in Actor Films only: {af_only:,} ({af_only/len(merged)*100:.1f}%)")
+        logger.info(f"   Movies in Actor Films only: {af_only:,} ({af_only / len(merged) * 100:.1f}%)")
 
     # Per-column null statistics
-    logger.info(f"\n📋 Column Completeness (non-null counts):")
+    logger.info("\n📋 Column Completeness (non-null counts):")
     null_counts = merged.null_count()
     for col in merged.columns:
         non_null = len(merged) - null_counts[col][0]
