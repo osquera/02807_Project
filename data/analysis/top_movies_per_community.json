@@ -2,29 +2,56 @@
   "girvan_newman": {
     "0": [
       {
-        "movie": "The Thin Red Line",
-        "degree": 1133,
-        "weighted_degree": 1203
+        "movie": "Hamlet",
+        "degree": 2624,
+        "weighted_degree": 3099
       },
       {
-        "movie": "Anchorman: The Legend of Ron Burgundy",
-        "degree": 955,
-        "weighted_degree": 1093
+        "movie": "The Player",
+        "degree": 2709,
+        "weighted_degree": 3028
       },
       {
-        "movie": "The Red Maple Leaf",
-        "degree": 984,
-        "weighted_degree": 1036
+        "movie": "The Three Musketeers",
+        "degree": 2471,
+        "weighted_degree": 2677
       },
       {
-        "movie": "Delirious",
-        "degree": 927,
-        "weighted_degree": 964
+        "movie": "Avengers: Endgame",
+        "degree": 1738,
+        "weighted_degree": 2107
       },
       {
-        "movie": "The Death and Life of Bobby Z",
-        "degree": 865,
-        "weighted_degree": 887
+        "movie": "Harry Potter and the Deathly Hallows: Part 1",
+        "degree": 1403,
+        "weighted_degree": 1819
+      }
+    ],
+    "7": [
+      {
+        "movie": "God Tussi Great Ho",
+        "degree": 538,
+        "weighted_degree": 584
+      },
+      {
+        "movie": "Mohabbatein",
+        "degree": 503,
+        "weighted_degree": 549
+      },
+      {
+        "movie": "Veer-Zaara",
+        "degree": 492,
+        "weighted_degree": 532
+      },
+      {
+        "movie": "Paheli",
+        "degree": 474,
+        "weighted_degree": 504
+      },
+      {
+        "movie": "Jaan-E-Mann: Let's Fall in Love... Again",
+        "degree": 428,
+        "weighted_degree": 467
       }
     ]
   },

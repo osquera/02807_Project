@@ -119,7 +119,7 @@ def build_movie_coactor_graph(actor_film_df: pl.DataFrame) -> nx.Graph:
     edge_weights = defaultdict(int)
 
     # For each actor, connect all pairs of their films
-    for _actor, films in actor_to_films.values():
+    for films in actor_to_films.values():
         if len(films) < 2:  # noqa: PLR2004
             continue
 
@@ -226,16 +226,29 @@ def apply_girvan_newman(G: nx.Graph, num_communities: int = 10, sample_size: int
         for node in comm_nodes:
             node_to_community[node] = comm_id
 
-    # Assign unanalyzed nodes to separate communities
+    # Assign unanalyzed nodes to nearest community based on edge weights
     next_comm_id = len(communities)
-    for node in G.nodes():
-        if node not in node_to_community:
+    unassigned_nodes = [node for node in G.nodes() if node not in node_to_community]
+
+    for node in unassigned_nodes:
+        # Find which community this node is most connected to
+        community_weights = defaultdict(int)
+        for neighbor in G.neighbors(node):
+            if neighbor in node_to_community:
+                neighbor_comm = node_to_community[neighbor]
+                community_weights[neighbor_comm] += G[node][neighbor].get("weight", 1)
+
+        # Assign to most connected community, or create new one if isolated
+        if community_weights:
+            best_community = max(community_weights.items(), key=lambda x: x[1])[0]
+            node_to_community[node] = best_community
+        else:
+            # Isolated node with no connections to analyzed nodes
             node_to_community[node] = next_comm_id
-            next_comm_id += 1
             next_comm_id += 1
 
     logger.info(
-        f"✅ Girvan-Newman: Found {len(communities)} communities (+ {next_comm_id - len(communities)} isolated)"
+        f"✅ Girvan-Newman: Found {len(communities)} communities (assigned {len(unassigned_nodes)} unanalyzed nodes)"
     )
 
     return node_to_community
@@ -419,27 +432,146 @@ def calculate_modularity(G: nx.Graph, communities: dict) -> float:  # noqa: N803
     return community.modularity(G, comm_list, weight="weight")
 
 
-def visualize_communities(
+def generate_configuration_model(G: nx.Graph, num_models: int = 10) -> list[nx.Graph]:  # noqa: N803
+    """Generate random Erdős-Rényi null models.
+
+    Creates null model networks using the Erdős-Rényi random graph model, which
+    preserves the number of nodes and edge density but randomizes all connections.
+    This is much faster than configuration models and provides a good baseline
+    for statistical comparison.
+
+    Args:
+        G: Original NetworkX graph
+        num_models: Number of random graphs to generate
+
+    Returns:
+        List of randomized NetworkX graphs
+
+    """
+    logger.info(f"🎲 Generating {num_models} Erdős-Rényi null model graphs...")
+
+    random_graphs = []
+    num_nodes = G.number_of_nodes()
+    num_edges = G.number_of_edges()
+
+    # Calculate edge probability for Erdős-Rényi model
+    # p = m / (n * (n-1) / 2) where m = edges, n = nodes
+    max_edges = num_nodes * (num_nodes - 1) / 2
+    edge_probability = num_edges / max_edges
+
+    # Store edge weights for later random assignment
+    all_weights = [data.get("weight", 1) for _, _, data in G.edges(data=True)]
+
+    # Get node labels from original graph
+    nodes_list = list(G.nodes())
+
+    logger.info(
+        f"   Using edge probability p={edge_probability:.6f} ({num_nodes:,} nodes, ~{num_edges:,} edges expected)"
+    )
+
+    for i in range(num_models):
+        try:
+            # Generate Erdős-Rényi random graph
+            random_graph = nx.erdos_renyi_graph(num_nodes, edge_probability, seed=42 + i)
+
+            # Relabel nodes to match original graph
+            mapping = dict(zip(range(num_nodes), nodes_list, strict=True))
+            random_graph = nx.relabel_nodes(random_graph, mapping)
+
+            # Randomly assign edge weights from the original distribution
+            random.seed(42 + i)
+            if random_graph.number_of_edges() > 0:
+                shuffled_weights = random.choices(all_weights, k=random_graph.number_of_edges())  # noqa: S311
+                for (u, v), weight in zip(random_graph.edges(), shuffled_weights, strict=True):
+                    random_graph[u][v]["weight"] = weight
+
+            random_graphs.append(random_graph)
+            logger.info(
+                f"   Model {i + 1}/{num_models}: {random_graph.number_of_nodes()} nodes, "
+                f"{random_graph.number_of_edges()} edges"
+            )
+
+        except (nx.NetworkXError, nx.NetworkXAlgorithmError) as e:
+            logger.warning(f"   Failed to generate model {i + 1}: {e}")
+            continue
+
+    logger.info(f"✅ Generated {len(random_graphs)} Erdős-Rényi null models")
+
+    return random_graphs
+
+
+def calculate_null_model_modularity(random_graphs: list[nx.Graph], communities: dict, method_name: str) -> dict:
+    """Calculate modularity statistics for null model comparison.
+
+    Args:
+        random_graphs: List of random configuration model graphs
+        communities: Community assignments from real network
+        method_name: Name of the clustering method
+
+    Returns:
+        Dictionary with null model statistics
+
+    """
+    logger.info(f"📊 Calculating null model modularity for {method_name}...")
+
+    modularities = []
+    for i, g_random in enumerate(random_graphs):
+        try:
+            # Filter communities to only include nodes present in this random graph
+            random_nodes = set(g_random.nodes())
+            filtered_communities = {node: comm_id for node, comm_id in communities.items() if node in random_nodes}
+
+            if not filtered_communities:
+                logger.warning(f"   Model {i + 1}: No overlapping nodes between graph and communities")
+                continue
+
+            mod = calculate_modularity(g_random, filtered_communities)
+            modularities.append(mod)
+        except (KeyError, ValueError, nx.NetworkXError) as e:
+            logger.warning(f"   Failed to calculate modularity for model {i + 1}: {e}")
+            continue
+
+    if not modularities:
+        logger.warning("   No valid modularity scores calculated")
+        return {
+            "method": method_name,
+            "num_models": 0,
+            "mean_modularity": 0.0,
+            "std_modularity": 0.0,
+            "min_modularity": 0.0,
+            "max_modularity": 0.0,
+        }
+
+    stats = {
+        "method": method_name,
+        "num_models": len(modularities),
+        "mean_modularity": float(np.mean(modularities)),
+        "std_modularity": float(np.std(modularities)),
+        "min_modularity": float(np.min(modularities)),
+        "max_modularity": float(np.max(modularities)),
+        "all_modularities": [float(m) for m in modularities],
+    }
+
+    logger.info(f"   Null model modularity: {stats['mean_modularity']:.4f} ± {stats['std_modularity']:.4f}")
+
+    return stats
+
+
+def visualize_network(
     G: nx.Graph,  # noqa: N803
-    communities: dict,
-    method_name: str,
-    max_nodes: int = 10000,
-    min_community_size: int = 100,
+    max_nodes: int | None = None,
 ) -> None:
-    """Visualize the graph with community coloring.
+    """Visualize the network graph without community coloring.
 
     Args:
         G: NetworkX graph
-        communities: Dictionary mapping node to community id
-        method_name: Name of the clustering method
-        max_nodes: Maximum nodes to visualize (for performance)
-        min_community_size: Minimum community size to label in visualization
+        max_nodes: Maximum nodes to visualize (for performance), None for full network
 
     """
-    logger.info(f"📊 Visualizing {method_name} communities...")
+    logger.info("📊 Visualizing network graph...")
 
-    # Sample nodes if graph is too large
-    if G.number_of_nodes() > max_nodes:
+    # Use full graph unless max_nodes is specified
+    if max_nodes is not None and G.number_of_nodes() > max_nodes:
         logger.info(f"   Sampling {max_nodes} nodes for visualization...")
         # Get largest connected component and sample from it
         if nx.is_connected(G):
@@ -450,10 +582,69 @@ def visualize_communities(
 
         G_plot = G.subgraph(nodes_to_plot).copy()  # noqa: N806
     else:
+        logger.info(f"   Visualizing full network with {G.number_of_nodes()} nodes")
         G_plot = G  # noqa: N806
 
-    # Create figure with space for legend on the right
-    _fig, ax = plt.subplots(figsize=(20, 12))
+    # Create figure with compact layout
+    _fig, ax = plt.subplots(figsize=(14, 10))
+
+    # Use spring layout for positioning
+    pos = nx.spring_layout(G_plot, k=0.5, iterations=50, seed=42)
+
+    # Draw graph
+    nx.draw_networkx_nodes(G_plot, pos, node_color="skyblue", node_size=50, alpha=0.8, ax=ax)
+    nx.draw_networkx_edges(G_plot, pos, alpha=0.2, width=0.5, ax=ax)
+
+    ax.set_title("Movie Co-Actor Network", fontsize=18, pad=15)
+    ax.axis("off")
+
+    # Compact layout
+    plt.tight_layout()
+
+    # Save
+    output_path = ANALYSIS_LOCATION / "network_graph.png"
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    logger.info(f"   Saved network visualization to {output_path}")
+
+
+def visualize_communities(
+    G: nx.Graph,  # noqa: N803
+    communities: dict,
+    method_name: str,
+    max_nodes: int | None = None,
+    min_community_size: int = 100,
+) -> None:
+    """Visualize the graph with community coloring.
+
+    Args:
+        G: NetworkX graph
+        communities: Dictionary mapping node to community id
+        method_name: Name of the clustering method
+        max_nodes: Maximum nodes to visualize (for performance), None for full network
+        min_community_size: Minimum community size to label in visualization
+
+    """
+    logger.info(f"📊 Visualizing {method_name} communities...")
+
+    # Use full graph unless max_nodes is specified
+    if max_nodes is not None and G.number_of_nodes() > max_nodes:
+        logger.info(f"   Sampling {max_nodes} nodes for visualization...")
+        # Get largest connected component and sample from it
+        if nx.is_connected(G):
+            nodes_to_plot = list(G.nodes())[:max_nodes]
+        else:
+            largest_cc = max(nx.connected_components(G), key=len)
+            nodes_to_plot = list(largest_cc)[:max_nodes]
+
+        G_plot = G.subgraph(nodes_to_plot).copy()  # noqa: N806
+    else:
+        logger.info(f"   Visualizing full network with {G.number_of_nodes()} nodes")
+        G_plot = G  # noqa: N806
+
+    # Create figure with compact layout for LaTeX reports
+    _fig, ax = plt.subplots(figsize=(14, 10))
 
     # Use spring layout for positioning
     pos = nx.spring_layout(G_plot, k=0.5, iterations=50, seed=42)
@@ -475,7 +666,7 @@ def visualize_communities(
 
     # For each community, find the node with highest weighted degree
     community_labels = []
-    cmap = plt.cm.get_cmap("tab20")
+    cmap = plt.colormaps["tab20"]
 
     for comm_id, nodes in comm_nodes.items():
         if len(nodes) < min_community_size:  # Skip small communities
@@ -500,29 +691,35 @@ def visualize_communities(
     # Sort by community ID for consistent ordering
     community_labels.sort(key=lambda x: x[0])
 
-    # Add labels to the right side of the plot
-    y_start = 0.95
-    y_step = 0.85 / max(len(community_labels), 1)
+    # Add compact labels to the right side closer to the graph
+    y_start = 0.98
+    y_step = 0.90 / max(len(community_labels), 1)
 
     for idx, (comm_id, label, color) in enumerate(community_labels):
         y_pos = y_start - idx * y_step
         ax.text(
-            1.02,
+            1.01,
             y_pos,
-            f"Community {comm_id}: {label}",
+            f"C{comm_id}: {label}",
             transform=ax.transAxes,
-            fontsize=10,
+            fontsize=12,
             fontweight="bold",
             color=color,
             verticalalignment="top",
-            bbox={"boxstyle": "round,pad=0.5", "facecolor": "white", "edgecolor": color, "linewidth": 2, "alpha": 0.9},
+            bbox={
+                "boxstyle": "round,pad=0.4",
+                "facecolor": "white",
+                "edgecolor": color,
+                "linewidth": 2.5,
+                "alpha": 0.95,
+            },
         )
 
-    ax.set_title(f"Movie Network Communities - {method_name}", fontsize=20, pad=20)
+    ax.set_title(f"Movie Network Communities - {method_name}", fontsize=18, pad=15)
     ax.axis("off")
 
-    # Adjust layout to prevent label cutoff
-    plt.subplots_adjust(right=0.75)
+    # Compact layout for LaTeX reports
+    plt.subplots_adjust(right=0.82, left=0.02, top=0.96, bottom=0.02)
 
     # Save
     output_path = ANALYSIS_LOCATION / f"communities_{method_name.lower().replace(' ', '_')}.png"
@@ -647,16 +844,33 @@ def visualize_top_movies_per_community(top_movies: dict, method_name: str, max_c
 
         # Prepare data
         movie_names = [
-            m[0][:50] + "..." if len(m[0]) > 50 else m[0] for m in movies  # noqa: PLR2004
+            m[0][:60] + "..." if len(m[0]) > 60 else m[0]  # noqa: PLR2004
+            for m in movies
         ]  # Truncate long names
         weighted_degrees = [m[2] for m in movies]
 
         # Create horizontal bar chart
         y_pos = np.arange(len(movie_names))
-        colors = plt.cm.get_cmap("tab20")(comm_id % 20)
-        ax.barh(y_pos, weighted_degrees, color=colors)
-        ax.set_yticks(y_pos)
-        ax.set_yticklabels(movie_names, fontsize=10)
+        colors = plt.colormaps["tab20"](comm_id % 20)
+        bars = ax.barh(y_pos, weighted_degrees, color=colors, height=0.7)
+
+        # Add movie titles inside the bars with white text
+        for bar, movie_name in zip(bars, movie_names, strict=True):
+            width = bar.get_width()
+            # Place text inside bar, aligned to the left with some padding
+            ax.text(
+                width * 0.02,  # 2% from left edge of bar
+                bar.get_y() + bar.get_height() / 2,
+                movie_name,
+                ha="left",
+                va="center",
+                color="white",
+                fontsize=13,
+                fontweight="bold",
+            )
+
+        # Remove y-axis labels since titles are now in bars
+        ax.set_yticks([])
         ax.invert_yaxis()
         ax.set_xlabel("Weighted Degree (Shared Actors)", fontsize=11)
         ax.set_title(f"Community {comm_id} - Top {len(movies)} Most Connected Movies", fontsize=12, pad=10)
@@ -681,6 +895,7 @@ def save_results(
     fast_spectral_communities: dict,
     stats: list,
     top_movies_data: dict | None = None,
+    null_model_stats: list | None = None,
 ) -> None:
     """Save graph and analysis results.
 
@@ -692,6 +907,7 @@ def save_results(
         fast_spectral_communities: Fast spectral clustering assignments
         stats: List of statistics dictionaries
         top_movies_data: Dictionary mapping method name to top movies per community
+        null_model_stats: List of null model statistics dictionaries
 
     """
     logger.info("💾 Saving results...")
@@ -719,6 +935,13 @@ def save_results(
     with open(stats_path, "w") as f:  # noqa: PTH123
         json.dump(stats, f, indent=2)
     logger.info(f"   Saved statistics to {stats_path}")
+
+    # Save null model statistics if provided
+    if null_model_stats is not None:
+        null_stats_path = ANALYSIS_LOCATION / "null_model_statistics.json"
+        with open(null_stats_path, "w") as f:  # noqa: PTH123
+            json.dump(null_model_stats, f, indent=2)
+        logger.info(f"   Saved null model statistics to {null_stats_path}")
 
     # Save top movies data if provided
     if top_movies_data is not None:
@@ -750,6 +973,33 @@ def save_results(
             f"{stat['largest_community']:<15}"
         )
     logger.info("=" * 80 + "\n")
+
+    # Create null model comparison table if available
+    if null_model_stats:
+        logger.info("=" * 80)
+        logger.info("NULL MODEL COMPARISON (Erdős-Rényi Baseline)")
+        logger.info("=" * 80)
+        logger.info(f"{'Method':<20} {'Real Modularity':<18} {'Null Mean ± Std':<25} {'Significance':<15}")
+        logger.info("-" * 80)
+
+        # Create lookup for real modularity values
+        real_mod = {stat["method"]: stat["modularity"] for stat in stats}
+
+        for null_stat in null_model_stats:
+            method = null_stat["method"]
+            real_value = real_mod.get(method, 0.0)
+            null_mean = null_stat["mean_modularity"]
+            null_std = null_stat["std_modularity"]
+
+            # Calculate z-score (how many standard deviations above null model)
+            if null_std > 0:
+                z_score = (real_value - null_mean) / null_std
+                significance = f"{z_score:.2f} sigma"
+            else:
+                significance = "N/A"
+
+            logger.info(f"{method:<20} {real_value:<18.4f} {null_mean:.4f} ± {null_std:.4f}    {significance:<15}")
+        logger.info("=" * 80 + "\n")
 
 
 def main() -> None:
@@ -802,12 +1052,41 @@ def main() -> None:
     )
     top_movies_data["fast_spectral"] = fast_spectral_top_movies
 
-    # Visualize communities
-    visualize_communities(G, gn_communities, "Girvan-Newman", min_community_size=MIN_COMMUNITY_SIZE)
-    visualize_communities(G, louvain_communities, "Louvain", min_community_size=MIN_COMMUNITY_SIZE)
-    # visualize_communities(G, spectral_communities, "Spectral Clustering", min_community_size=MIN_COMMUNITY_SIZE)
+    # Generate null models for comparison
+    logger.info("\n" + "=" * 80)
+    logger.info("GENERATING NULL MODELS (Erdős-Rényi Model)")
+    logger.info("=" * 80)
+
+    random_graphs = generate_configuration_model(G, num_models=10)
+
+    # Calculate null model modularity for each method
+    null_model_stats = []
+    null_model_stats.append(calculate_null_model_modularity(random_graphs, gn_communities, "Girvan-Newman"))
+    null_model_stats.append(calculate_null_model_modularity(random_graphs, louvain_communities, "Louvain"))
+    null_model_stats.append(
+        calculate_null_model_modularity(random_graphs, fast_spectral_communities, "Fast Spectral Clustering")
+    )
+
+    # Visualize the network (sample 10% for performance)
+    sample_size = max(1000, G.number_of_nodes() // 10)
+    visualize_network(G, max_nodes=sample_size)
+
+    # Visualize communities (sample 10% for performance)
     visualize_communities(
-        G, fast_spectral_communities, "Fast Spectral Clustering", min_community_size=MIN_COMMUNITY_SIZE
+        G, gn_communities, "Girvan-Newman", max_nodes=sample_size, min_community_size=MIN_COMMUNITY_SIZE
+    )
+    visualize_communities(
+        G, louvain_communities, "Louvain", max_nodes=sample_size, min_community_size=MIN_COMMUNITY_SIZE
+    )
+    # visualize_communities(
+    #     G, spectral_communities, "Spectral Clustering", max_nodes=sample_size, min_community_size=MIN_COMMUNITY_SIZE
+    # )
+    visualize_communities(
+        G,
+        fast_spectral_communities,
+        "Fast Spectral Clustering",
+        max_nodes=sample_size,
+        min_community_size=MIN_COMMUNITY_SIZE,
     )
 
     # Visualize top movies per community
@@ -817,7 +1096,16 @@ def main() -> None:
 
     # Save results
     # save_results(G, gn_communities, louvain_communities, spectral_communities, fast_spectral_communities, all_stats)
-    save_results(G, gn_communities, louvain_communities, {}, fast_spectral_communities, all_stats, top_movies_data)
+    save_results(
+        G,
+        gn_communities,
+        louvain_communities,
+        {},
+        fast_spectral_communities,
+        all_stats,
+        top_movies_data,
+        null_model_stats,
+    )
 
     logger.info("🎉 Actor network analysis completed!")
 
