@@ -1,31 +1,22 @@
+import argparse
 from pathlib import Path
 
 import numpy as np
 import polars as pl
 from helpers.logger import logger
-from tqdm import tqdm
+from scipy import sparse
+from sklearn.preprocessing import normalize
 
 # Data paths
-DATA_LOCATION = Path("data/clean")
-DATA_PATH = DATA_LOCATION / "large_movie_dataset_clean.csv"
-
-# Analysis parameters - adjust these to tune the algorithm
-SAMPLE_SIZE = 50000  # Number of users to analyze (None = all users)
-MIN_RATING = 3.0  # Minimum rating to include (None = include all ratings)
-MIN_COMMON_USERS = 5  # Minimum number of common users between items for similarity calculation
-TOP_SIMILAR_ITEMS = 20  # Number of similar items to consider for predictions
-TOP_RECOMMENDATIONS = 10  # Number of recommendations to generate
-MIN_MOVIE_RATINGS = 50  # Only compute similarities for movies with at least this many ratings
-MAX_MOVIES = 3000  # Limit to top N most-rated movies for similarity computation
-
-# Test case parameters
-TEST_USER_ID = 1  # User ID to hold out for testing (None = no test case)
+DATA_LOCATION = Path("data/merged")
+DATA_PATH = DATA_LOCATION / "movies_merged.csv"
 
 
 def load_ratings_data(
     sample_size: int | None = None,
-    min_rating: float | None = None,
-    exclude_user: int | None = None
+    min_rating: float | None = 3.0,
+    exclude_user: int | None = None,
+    seed: int = 42
 ) -> tuple[pl.DataFrame, pl.DataFrame | None]:
     """Load and prepare ratings data for collaborative filtering.
 
@@ -33,6 +24,7 @@ def load_ratings_data(
         sample_size: Number of users to include (None = all users)
         min_rating: Minimum rating threshold to filter (None = include all)
         exclude_user: User ID to exclude from training data (for testing)
+        seed: Random seed for sampling
 
     Returns:
         Tuple of (ratings_df, test_user_ratings_df)
@@ -41,6 +33,31 @@ def load_ratings_data(
 
     """
     df = pl.scan_csv(DATA_PATH, infer_schema=True)
+    df = df.filter(
+            pl.col("rotten_tomatoes_link").is_not_null()
+            & pl.col("lm_movie_name_original").is_not_null()
+            & pl.col("af_film_original").is_not_null()
+        )
+
+    # Select and process columns to explode user IDs and ratings
+    df = df.select([
+        pl.col("lm_movie_name_original").alias("Movie_Name"),
+        pl.col("lm_user_ids_list").str.split("|").alias("User_Id_List"),
+        pl.col("lm_ratings_list").str.split("|").alias("Rating_List")
+    ])
+
+    # Explode both lists simultaneously
+    df = df.explode(["User_Id_List", "Rating_List"])
+
+    # Cast to appropriate types
+    df = df.select([
+        pl.col("Movie_Name"),
+        pl.col("User_Id_List").cast(pl.Int64).alias("User_Id"),
+        pl.col("Rating_List").cast(pl.Float64).alias("Rating")
+    ])
+
+    # Handle duplicates by averaging ratings for same user-movie pair
+    df = df.group_by(["User_Id", "Movie_Name"]).agg(pl.col("Rating").mean())
 
     # Filter by minimum rating if specified
     if min_rating is not None:
@@ -53,9 +70,6 @@ def load_ratings_data(
             f"Filtering movies with rating >= {min_rating}: "
             f"removed {percentage:.1f}% of ratings"
         )
-
-    # Select only relevant columns
-    df = df.select(["User_Id", "Movie_Name", "Rating"])
 
     # Collect the data
     ratings_df = df.collect()
@@ -71,10 +85,14 @@ def load_ratings_data(
 
     # Apply sample size if specified
     if sample_size is not None:
-        # Sort to ensure deterministic user selection across runs
-        unique_users = ratings_df["User_Id"].unique().sort()[:sample_size]
-        # Convert to set to avoid is_in deprecation warning
-        ratings_df = ratings_df.filter(pl.col("User_Id").is_in(set(unique_users.to_list()))).sort("User_Id")
+        # Randomly sample users with seed
+        # Sort unique users to ensure deterministic sampling with seed
+        unique_users = ratings_df["User_Id"].unique().sort()
+        if len(unique_users) > sample_size:
+            sampled_users = unique_users.sample(n=sample_size, seed=seed)
+            # Convert to list to avoid Polars deprecation warning
+            ratings_df = ratings_df.filter(pl.col("User_Id").is_in(sampled_users.to_list()))
+            logger.info(f"Sampled {sample_size} users with seed {seed}")
 
     logger.info(
         f"Loaded {len(ratings_df)} ratings from {ratings_df['User_Id'].n_unique()} users "
@@ -88,122 +106,101 @@ def compute_item_similarity(
     ratings_df: pl.DataFrame,
     min_common_users: int = 5,
     min_similarity: float = 0.0,
-    min_movie_ratings: int = 50,
-    max_movies: int | None = 5000,
 ) -> dict[tuple[str, str], float]:
-    """Compute pairwise similarity between all items using cosine similarity.
-
-    Uses vectorized operations with numpy for efficiency.
+    """Compute pairwise similarity between all items using sparse matrix operations.
 
     Args:
         ratings_df: DataFrame with User_Id, Movie_Name, Rating columns
         min_common_users: Minimum number of common users required to compute similarity
         min_similarity: Minimum similarity score to store (filters out weak similarities)
-        min_movie_ratings: Only include movies with at least this many ratings
-        max_movies: Limit to top N most-rated movies (None for no limit)
 
     Returns:
         Dictionary mapping (movie1, movie2) tuples to similarity scores
 
     """
-    logger.info("Filtering to frequent movies to reduce computation...")
+    # Get list of all movies
+    movies_list = ratings_df["Movie_Name"].unique().to_list()
+    logger.info(f"Computing similarity for {len(movies_list)} movies")
 
-    # Count ratings per movie and filter to frequent movies
-    movie_counts = (
-        ratings_df.group_by("Movie_Name")
-        .agg(pl.len().alias("rating_count"))
-        .filter(pl.col("rating_count") >= min_movie_ratings)
-        .sort("rating_count", descending=True)
+    logger.info("Constructing sparse user-item matrix...")
+
+    # Map User_Id and Movie_Name to indices
+    # We need consistent mapping for movies
+    movie_to_idx = {movie: i for i, movie in enumerate(movies_list)}
+
+    # For users, we just need a mapping to 0..N-1
+    unique_users = ratings_df["User_Id"].unique()
+    user_to_idx = {user: i for i, user in enumerate(unique_users.to_list())}
+
+    # Extract data for sparse matrix
+    # Data is already deduplicated in load_ratings_data
+    users = ratings_df["User_Id"].to_list()
+    movies = ratings_df["Movie_Name"].to_list()
+    ratings = ratings_df["Rating"].to_list()
+
+    row_indices = [user_to_idx[u] for u in users]
+    col_indices = [movie_to_idx[m] for m in movies]
+
+    n_users = len(unique_users)
+    n_movies = len(movies_list)
+
+    # Create sparse matrix (rows=users, cols=movies)
+    # Use float32 to save memory
+    user_item_matrix = sparse.csr_matrix(
+        (ratings, (row_indices, col_indices)),
+        shape=(n_users, n_movies),
+        dtype=np.float32
     )
 
-    # Optionally limit to top N movies
-    if max_movies is not None:
-        movie_counts = movie_counts.head(max_movies)
+    logger.info(f"Sparse matrix shape: {user_item_matrix.shape}, stored elements: {user_item_matrix.nnz}")
 
-    frequent_movies_set = set(movie_counts["Movie_Name"].to_list())
+    logger.info("Computing item-item similarity using sparse matrix operations...")
 
-    logger.info(
-        f"Filtered to {len(frequent_movies_set)} movies (min {min_movie_ratings} ratings each)"
-    )
+    # 1. Normalize columns (items) to unit length for Cosine Similarity
+    # CSC format is faster for column operations
+    item_user_matrix = user_item_matrix.tocsc()
 
-    # Filter ratings to only include frequent movies
-    # Using a set avoids the is_in deprecation warning
-    filtered_ratings = ratings_df.filter(pl.col("Movie_Name").is_in(frequent_movies_set))
+    # Compute column norms
+    # We can use sklearn's normalize or do it manually
+    # normalize(X, axis=0) normalizes columns
+    item_user_matrix_norm = normalize(item_user_matrix, norm="l2", axis=0)  # type: ignore  # noqa: PGH003
 
-    logger.info("Computing item-item similarity matrix...")
+    # 2. Compute Cosine Similarity: S = R_norm.T @ R_norm
+    # Result is (n_movies, n_movies)
+    # This computes dot product of normalized columns -> Cosine Similarity
+    similarity_matrix = item_user_matrix_norm.T @ item_user_matrix_norm
 
-    # Create user-item matrix using pivot with aggregation
-    # Group by User_Id and Movie_Name, taking mean in case of duplicates
-    ratings_agg = filtered_ratings.group_by(["User_Id", "Movie_Name"]).agg(
-        pl.col("Rating").mean()
-    )
+    # 3. Compute Common Users Count: C = R_bin.T @ R_bin
+    # Binarize matrix
+    item_user_matrix_bin = item_user_matrix.copy()
+    item_user_matrix_bin.data[:] = 1.0
 
-    # Pivot to create user-item matrix
-    user_item_matrix = ratings_agg.pivot(
-        on="Movie_Name",
-        index="User_Id",
-        values="Rating"
-    )
+    common_users_matrix = item_user_matrix_bin.T @ item_user_matrix_bin
 
-    # Sort movie names alphabetically for deterministic results across runs
-    movies = sorted([col for col in user_item_matrix.columns if col != "User_Id"])
-    logger.info(f"Computing similarities for {len(movies)} movies")
+    logger.info("Filtering similarities...")
 
-    # Convert to numpy for vectorized computation
-    # Replace nulls with 0 and convert to numpy array
-    matrix_values = user_item_matrix.select(movies).fill_null(0).to_numpy()
-
-    # Create boolean mask for non-zero values (more memory efficient than int)
-    non_zero_mask = matrix_values != 0
-
-    logger.info("Computing pairwise similarities using vectorized operations...")
-
+    # Convert to dictionary, applying filters
     similarities: dict[tuple[str, str], float] = {}
-    n_movies = len(movies)
 
-    # Compute similarities in batches to avoid memory issues
-    batch_size = 500
-    for i in tqdm(range(0, n_movies, batch_size), desc="Computing similarities"):
-        end_i = min(i + batch_size, n_movies)
+    # Iterate the similarity matrix and check common users count
+    sim_dense = similarity_matrix.toarray()
+    common_dense = common_users_matrix.toarray()
 
-        # Get batch of movies
-        batch_vectors = matrix_values[:, i:end_i]
-        batch_norms = np.linalg.norm(batch_vectors, axis=0)
-        batch_nonzero_mask = non_zero_mask[:, i:end_i]
-
-        for j in range(end_i, n_movies):
-            movie_j_vec = matrix_values[:, j]
-            movie_j_norm = np.linalg.norm(movie_j_vec)
-
-            if movie_j_norm == 0:
+    count = 0
+    for i in range(n_movies):
+        for j in range(i + 1, n_movies):
+            if common_dense[i, j] < min_common_users:
                 continue
 
-            # Compute dot products for entire batch at once
-            dot_products = batch_vectors.T @ movie_j_vec  # Shape: (batch_size,)
+            sim = sim_dense[i, j]
+            if sim > min_similarity:
+                movie1 = movies_list[i]
+                movie2 = movies_list[j]
+                similarities[(movie1, movie2)] = float(sim)
+                similarities[(movie2, movie1)] = float(sim)
+                count += 1
 
-            # Compute common users count for batch using boolean operations
-            movie_j_nonzero_mask = non_zero_mask[:, j]
-            # Count common non-zero entries: sum of (batch_mask AND movie_j_mask)
-            common_users_counts = (batch_nonzero_mask & movie_j_nonzero_mask[:, np.newaxis]).sum(axis=0)
-
-            # Compute similarities for valid pairs
-            for k in range(len(dot_products)):
-                movie_i_idx = i + k
-                if common_users_counts[k] < min_common_users:
-                    continue
-
-                if batch_norms[k] == 0:
-                    continue
-
-                similarity = dot_products[k] / (batch_norms[k] * movie_j_norm)
-
-                if similarity > min_similarity:
-                    movie1 = movies[movie_i_idx]
-                    movie2 = movies[j]
-                    similarities[(movie1, movie2)] = similarity
-                    similarities[(movie2, movie1)] = similarity
-
-    logger.info(f"Computed {len(similarities) // 2} item-item similarity pairs")
+    logger.info(f"Computed {count:,} item-item similarity pairs")
     return similarities
 
 
@@ -256,7 +253,6 @@ def predict_rating(
 
 def get_recommendations(
     user_ratings: dict[str, float],
-    all_movies: set[str],
     similarities: dict[tuple[str, str], float],
     top_k_similar: int = 20,
 ) -> pl.DataFrame:
@@ -264,7 +260,6 @@ def get_recommendations(
 
     Args:
         user_ratings: Dictionary of movies the user has rated
-        all_movies: Set of all available movies
         similarities: Item-item similarity dictionary
         top_k_similar: Number of similar items to use for each prediction
 
@@ -272,15 +267,30 @@ def get_recommendations(
         DataFrame with recommended movies and predicted ratings
 
     """
-    # Find movies user hasn't rated
-    rated_movies = set(user_ratings.keys())
-    unrated_movies = all_movies - rated_movies
+    # Optimization: Only consider movies that are similar to what the user has rated
+    # Instead of iterating all unrated movies, we find neighbors of rated movies
 
-    logger.info(f"Generating predictions for {len(unrated_movies)} unrated movies...")
+    candidate_movies = set()
+    rated_movies_set = set(user_ratings.keys())
 
-    # Predict ratings for unrated movies
+    # Iterate similarities keys to find neighbors of rated movies
+    for m1, m2 in similarities:
+        if m1 in rated_movies_set and m2 not in rated_movies_set:
+            candidate_movies.add(m2)
+        elif m2 in rated_movies_set and m1 not in rated_movies_set:
+            candidate_movies.add(m1)
+
+    logger.info(f"Found {len(candidate_movies)} candidate movies based on similarity")
+
+    if not candidate_movies:
+        logger.warning("No similar movies found for recommendations")
+        return pl.DataFrame({"movie": [], "predicted_rating": []})
+
+    logger.info(f"Generating predictions for {len(candidate_movies)} candidate movies...")
+
+    # Predict ratings for candidate movies
     predictions = []
-    for movie in unrated_movies:
+    for movie in candidate_movies:
         predicted_rating = predict_rating(
             user_ratings,
             movie,
@@ -359,22 +369,51 @@ def evaluate_recommendations(
     }
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Collaborative filtering on merged dataset")
+
+    parser.add_argument("--sample-size", type=int, default=None, help="Number of users to sample (None = all)")
+    parser.add_argument("--min-rating", type=float, default=3.0, help="Minimum rating to include")
+    parser.add_argument("--exclude-user", type=int, default=1, help="User ID to hold out for testing (default: 1)")
+    parser.add_argument("--no-test-user", action="store_true", help="Do not hold out a test user")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for sampling")
+
+    parser.add_argument("--min-common-users", type=int, default=5, help="Minimum common users for similarity")
+    parser.add_argument("--min-similarity", type=float, default=0.0, help="Minimum similarity threshold to keep")
+    parser.add_argument(
+        "--top-similar-items",
+        type=int,
+        default=20,
+        help="How many similar items to use for prediction",
+    )
+    parser.add_argument(
+        "--top-recommendations",
+        type=int,
+        default=10,
+        help="How many recommendations to show",
+    )
+
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    # Step 1: Load and prepare data
-    logger.info("Loading ratings data from cleaned dataset")
+    args = parse_args()
+
+    # Step 1: Load ratings data
+    logger.info("Loading ratings data from merged dataset")
     ratings_df, test_user_ratings = load_ratings_data(
-        sample_size=SAMPLE_SIZE,
-        min_rating=MIN_RATING,
-        exclude_user=TEST_USER_ID
+        sample_size=args.sample_size,
+        min_rating=args.min_rating,
+        exclude_user=None if args.no_test_user else args.exclude_user,
+        seed=args.seed,
     )
 
     # Step 2: Compute item-item similarity matrix
     logger.info("Computing item similarity matrix")
     similarities = compute_item_similarity(
         ratings_df,
-        min_common_users=MIN_COMMON_USERS,
-        min_movie_ratings=MIN_MOVIE_RATINGS,
-        max_movies=MAX_MOVIES,
+        min_common_users=args.min_common_users,
+        min_similarity=args.min_similarity,
     )
 
     # Get all available movies
@@ -382,43 +421,66 @@ if __name__ == "__main__":
 
     # Step 3: Test case - generate recommendations for held-out user
     if test_user_ratings is not None and len(test_user_ratings) > 0:
-        logger.info(f"Test Case: Generating recommendations for User {TEST_USER_ID}")
+        logger.info(f"Test Case: Generating recommendations for User {args.exclude_user}")
 
-        # Create user rating dictionary from test user's ratings
+        # Split user ratings into input (for recommendation) and test (for evaluation)
+        # Sort first to ensure deterministic split with seed
+        test_user_ratings = test_user_ratings.sort("Movie_Name").sample(fraction=1.0, shuffle=True, seed=args.seed)
+        n_ratings = len(test_user_ratings)
+
+        # Use 80% for input, 20% for evaluation
+        n_train = int(n_ratings * 0.8)
+
+        # Ensure at least one rating for input if we have ratings
+        if n_train < 1 and n_ratings > 0:
+            n_train = 1
+
+        if n_train < n_ratings:
+            train_ratings = test_user_ratings.head(n_train)
+            eval_ratings = test_user_ratings.tail(n_ratings - n_train)
+            logger.info(f"Splitting user ratings: {len(train_ratings)} for input, {len(eval_ratings)} for evaluation")
+        else:
+            train_ratings = test_user_ratings
+            eval_ratings = None
+            logger.info(f"Using all {len(train_ratings)} ratings for input (too few to split)")
+
+        # Create user rating dictionary from TRAIN ratings
         user_ratings_dict = dict(
-            zip(test_user_ratings["Movie_Name"], test_user_ratings["Rating"], strict=True)
+            zip(train_ratings["Movie_Name"], train_ratings["Rating"], strict=True)
         )
 
-        logger.info(f"Test user has rated {len(user_ratings_dict)} movies")
-        logger.info(f"Average rating: {test_user_ratings['Rating'].mean():.2f}")
+        logger.info(f"User has rated {len(user_ratings_dict)} movies (in input set)")
+        logger.info(f"Average rating: {train_ratings['Rating'].mean():.2f}")
 
         # Show sample of user's highest rated movies
-        top_rated = test_user_ratings.sort("Rating", descending=True).head(5)
-        logger.info("User's top 5 highest rated movies:")
+        top_rated = train_ratings.sort("Rating", descending=True).head(5)
+        logger.info("User's top 5 highest rated movies (from input set):")
         logger.info(f"\n{top_rated}")
 
         # Generate recommendations
         logger.info("Generating recommendations...")
         recommendations = get_recommendations(
             user_ratings_dict,
-            all_movies,
             similarities,
-            top_k_similar=TOP_SIMILAR_ITEMS,
+            top_k_similar=args.top_similar_items,
         )
 
         if len(recommendations) > 0:
-            logger.info(f"Top {TOP_RECOMMENDATIONS} recommendations for User {TEST_USER_ID}:")
-            logger.info(f"\n{recommendations.head(TOP_RECOMMENDATIONS)}")
+            logger.info(f"Top {args.top_recommendations} recommendations for User {args.exclude_user}:")
+            logger.info(f"\n{recommendations.head(args.top_recommendations)}")
 
             # Evaluate if we have test data
-            metrics = evaluate_recommendations(test_user_ratings, recommendations)
-            common_movies_count = metrics.get("common_movies", 0)
-            if common_movies_count and common_movies_count > 0:
-                logger.info("Evaluation Metrics:")
-                logger.info(f"  Common movies: {metrics['common_movies']}")
-                logger.info(f"  RMSE: {metrics['rmse']:.3f}")
-                logger.info(f"  MAE: {metrics['mae']:.3f}")
+            if eval_ratings is not None and len(eval_ratings) > 0:
+                metrics = evaluate_recommendations(eval_ratings, recommendations)
+                common_movies_count = metrics.get("common_movies", 0)
+                if common_movies_count and common_movies_count > 0:
+                    logger.info("Evaluation Metrics (on held-out ratings):")
+                    logger.info(f"  Common movies: {metrics['common_movies']}")
+                    logger.info(f"  RMSE: {metrics['rmse']:.3f}")
+                    logger.info(f"  MAE: {metrics['mae']:.3f}")
+                else:
+                    logger.info("Evaluation: No overlap between recommendations and held-out ratings")
         else:
             logger.warning("No recommendations could be generated for this user")
     else:
-        logger.info("No test user specified. Set TEST_USER_ID to enable testing.")
+        logger.info("No test user specified. Use --exclude-user to set a test user or omit --no-test-user flag.")
