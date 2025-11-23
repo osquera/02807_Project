@@ -5,8 +5,8 @@ import polars as pl
 from helpers.logger import logger
 
 # Data paths
-DATA_LOCATION = Path("data/clean")
-DATA_PATH = DATA_LOCATION / "large_movie_dataset_clean.csv"
+DATA_LOCATION = Path("data/merged")
+DATA_PATH = DATA_LOCATION / "movies_merged.csv"
 
 # Constants
 ITEMSET_LENGTH_TWO = 2
@@ -30,10 +30,43 @@ def create_user_movie_df(
 
     """
     df = pl.scan_csv(DATA_PATH, infer_schema=True)
+    df = df.filter(
+            pl.col("rotten_tomatoes_link").is_not_null()
+            & pl.col("lm_movie_name_original").is_not_null()
+            & pl.col("af_film_original").is_not_null()
+        )
+
+    # Select and process columns to explode user IDs and ratings
+    df = df.select([
+        pl.col("lm_movie_name_original").alias("Movie_Name"),
+        pl.col("lm_user_ids_list").str.split("|").alias("User_Id_List"),
+        pl.col("lm_ratings_list").str.split("|").alias("Rating_List")
+    ])
+
+    # Explode both lists simultaneously
+    df = df.explode(["User_Id_List", "Rating_List"])
+
+    # Cast to appropriate types
+    df = df.select([
+        pl.col("Movie_Name"),
+        pl.col("User_Id_List").cast(pl.Int64).alias("User_Id"),
+        pl.col("Rating_List").cast(pl.Float64).alias("Rating")
+    ])
+
+    # Count rows before deduplication
+    n_rows_raw = df.select(pl.len()).collect().item()
+
+    # Handle duplicates by averaging ratings for same user-movie pair
+    df = df.group_by(["User_Id", "Movie_Name"]).agg(pl.col("Rating").mean())
+
+    # Count rows after deduplication
+    n_rows_unique = df.select(pl.len()).collect().item()
+    n_duplicates = n_rows_raw - n_rows_unique
+    logger.info(f"Found {n_duplicates} duplicate user-movie entries (averaged)")
 
     # Filter by minimum rating if specified
     if min_rating is not None:
-        total_ratings = df.select(pl.len()).collect().item()
+        total_ratings = n_rows_unique
         df = df.filter(pl.col("Rating") >= min_rating)
         filtered_ratings = df.select(pl.len()).collect().item()
         removed_ratings = total_ratings - filtered_ratings
