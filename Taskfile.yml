@@ -54,3 +54,11 @@ tasks:
     desc: Explores only the cleaned datasets with statistics and descriptions
     cmds:
       - uv run python src/02807_project/explore_data.py --version clean
+  run-frequent-items:
+    desc: Run frequent itemsets analysis (use -- to pass args, e.g., -- --min-support 0.15)
+    cmds:
+      - uv run python src/02807_project/frequent_items.py {{.CLI_ARGS}}
+  run-collaborative-filtering:
+    desc: Run collaborative filtering on merged dataset (pass args after --)
+    cmds:
+      - uv run python src/02807_project/collaborative_filtering.py {{.CLI_ARGS}}
