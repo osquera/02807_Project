@@ -34,3 +34,5 @@ __pycache__/
 outputs/
 # Binaries and executables
 bin/
+# Graph files
+*.gexf

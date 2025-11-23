@@ -60,6 +60,11 @@ task retry-failed-scrapes
 ```
 Retries scraping movies that previously failed during the main scraping process. Updates existing entries in the output file instead of creating duplicates - failed entries are replaced with successful results when possible.
 
+```
+task merge-data
+```
+Merges all cleaned datasets into a single comprehensive dataset using normalized movie titles as the merge key. Handles inconsistencies like case variations and year annotations (e.g., "Movie (2020)"). Aggregates reviews and actors into lists. Creates `movies_merged.csv` in `data/merged/`.
+
 ### Data Exploration Tasks
 
 **Explore all datasets (raw and cleaned):**
