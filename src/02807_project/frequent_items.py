@@ -1,4 +1,5 @@
 import argparse
+import random
 from pathlib import Path
 
 import polars as pl
@@ -249,18 +250,16 @@ def generate_association_rules(
 
 def get_recommendations_for_movies(
     movies: list[str],
-    rules: pl.DataFrame,
-    top_n: int = 5
+    rules: pl.DataFrame
 ) -> pl.DataFrame:
     """Get movie recommendations based on a list of movies using association rules.
 
     Args:
         movies: List of movie names that the user has watched
         rules: DataFrame of association rules
-        top_n: Number of top recommendations to return
 
     Returns:
-        DataFrame with recommended movies and their aggregated scores
+        DataFrame with recommended movies and their aggregated scores (sorted by avg_score)
 
     """
     if len(rules) == 0:
@@ -296,7 +295,56 @@ def get_recommendations_for_movies(
         pl.col("score").mean().alias("avg_score"),
         pl.col("score").max().alias("max_score"),
         pl.len().alias("count")
-    ]).sort("avg_score", descending=True).head(top_n)
+    ]).sort("avg_score", descending=True)
+
+
+def evaluate_recommendations(
+    test_movies: list[str],
+    recommendations: pl.DataFrame
+) -> dict[str, float | int]:
+    """Evaluate recommendation quality using test data.
+
+    Args:
+        test_movies: List of movies the user actually watched (ground truth)
+        recommendations: DataFrame with recommended movies
+
+    Returns:
+        Dictionary with evaluation metrics
+
+    """
+    if len(recommendations) == 0:
+        logger.warning("No recommendations to evaluate")
+        return {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "hits": 0,
+            "total_recommendations": 0,
+            "total_test_movies": len(test_movies)
+        }
+
+    # Get set of recommended movies
+    recommended_movies = set(recommendations["movie"].to_list())
+    test_movies_set = set(test_movies)
+
+    # Calculate hits (movies that were both recommended and in test set)
+    hits = len(recommended_movies & test_movies_set)
+
+    # Calculate precision and recall
+    precision = hits / len(recommended_movies) if len(recommended_movies) > 0 else 0.0
+    recall = hits / len(test_movies_set) if len(test_movies_set) > 0 else 0.0
+
+    # Calculate F1 score
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "hits": hits,
+        "total_recommendations": len(recommended_movies),
+        "total_test_movies": len(test_movies_set)
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -359,6 +407,18 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable test user holdout"
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for train/test split (default: 42)"
+    )
+    parser.add_argument(
+        "--train-fraction",
+        type=float,
+        default=0.8,
+        help="Fraction of test user's movies to use for training (default: 0.8)"
+    )
 
     return parser.parse_args()
 
@@ -399,25 +459,60 @@ if __name__ == "__main__":
         logger.info(f"Test Case: Generating recommendations for User {args.test_user_id}")
         logger.info(f"Test user watched {len(test_user_movies)} movies")
 
-        # Generate recommendations based on their movies
-        recommendations = get_recommendations_for_movies(
-            test_user_movies,
-            rules_sorted,
-            top_n=args.top_recommendations
+        # Split user's movies into train and test for evaluation
+        n_movies = len(test_user_movies)
+        n_train = int(n_movies * args.train_fraction)
+
+        # Ensure at least one movie for training if we have movies
+        if n_train < 1 and n_movies > 0:
+            n_train = 1
+
+        if n_train < n_movies:
+            # Shuffle movies deterministically with seed
+            # Convert to list to ensure it's mutable for shuffling
+            movies_shuffled = list(test_user_movies)
+            random.seed(args.seed)
+            random.shuffle(movies_shuffled)
+
+            train_movies = movies_shuffled[:n_train]
+            eval_movies = movies_shuffled[n_train:]
+            logger.info(f"Split user's movies: {len(train_movies)} for input, {len(eval_movies)} for evaluation")
+        else:
+            train_movies = test_user_movies
+            eval_movies = []
+            logger.info(f"Using all {len(train_movies)} movies for input (too few to split)")
+
+        # Generate ALL recommendations based on TRAIN movies (for proper evaluation)
+        all_recommendations = get_recommendations_for_movies(
+            train_movies,
+            rules_sorted
         )
 
-        if len(recommendations) > 0:
+        if len(all_recommendations) > 0:
+            # Show only top N to user
             logger.info(f"Top {args.top_recommendations} recommendations for User {args.test_user_id}:")
-            logger.info(f"\n{recommendations}")
+            logger.info(f"\n{all_recommendations.head(args.top_recommendations)}")
 
-            # Show which movies weren't in the test user's list (actual recommendations)
-            already_watched = set(test_user_movies)
-            # Using set directly avoids is_in deprecation warning
-            new_recs = recommendations.filter(
-                ~pl.col("movie").is_in(already_watched)
+            # Show which movies weren't in the train set (actual new recommendations)
+            train_watched = set(train_movies)
+            new_recs = all_recommendations.filter(
+                ~pl.col("movie").is_in(train_watched)
             )
-            logger.info(f"New recommendations (not already watched): {len(new_recs)}")
+            logger.info(f"New recommendations (not in training set): {len(new_recs)}")
             if len(new_recs) > 0:
-                logger.info(f"\n{new_recs}")
+                logger.info(f"\n{new_recs.head(args.top_recommendations)}")
+
+            # Evaluate against held-out movies if we have them
+            if len(eval_movies) > 0:
+                logger.info("\nEvaluating recommendations against held-out movies...")
+                logger.info(f"Using all new {len(new_recs)} recommendations for evaluation")
+                metrics = evaluate_recommendations(eval_movies, new_recs)
+                logger.info("Evaluation Metrics:")
+                logger.info(f"  Test movies: {metrics['total_test_movies']}")
+                logger.info(f"  Recommendations: {metrics['total_recommendations']}")
+                logger.info(f"  Hits: {metrics['hits']}")
+                logger.info(f"  Precision: {metrics['precision']:.3f}")
+                logger.info(f"  Recall: {metrics['recall']:.3f}")
+                logger.info(f"  F1 Score: {metrics['f1']:.3f}")
         else:
             logger.info("No recommendations could be generated for this user")
