@@ -6,21 +6,19 @@ import polars as pl
 from helpers.logger import logger
 
 # Data paths
-DATA_LOCATION = Path("data/merged")
-DATA_PATH = DATA_LOCATION / "movies_merged.csv"
+DATA_LOCATION = Path("data/clean")
+DATA_PATH = DATA_LOCATION / "large_movie_dataset_clean.csv"
 
 # Constants
 ITEMSET_LENGTH_TWO = 2
 
 def create_user_movie_df(
-    sample_size: int | None = None,
     min_rating: float | None = None,
     exclude_user: int | None = None
 ) -> tuple[dict, list[str] | None]:
     """Create a dictionary mapping User_Id to list of movies they watched/rated.
 
     Args:
-        sample_size: Number of users to include (None = all users)
         min_rating: Minimum rating threshold to filter movies (None = include all)
         exclude_user: User ID to exclude from the dataset (for testing)
 
@@ -31,43 +29,10 @@ def create_user_movie_df(
 
     """
     df = pl.scan_csv(DATA_PATH, infer_schema=True)
-    df = df.filter(
-            pl.col("rotten_tomatoes_link").is_not_null()
-            & pl.col("lm_movie_name_original").is_not_null()
-            & pl.col("af_film_original").is_not_null()
-        )
-
-    # Select and process columns to explode user IDs and ratings
-    df = df.select([
-        pl.col("lm_movie_name_original").alias("Movie_Name"),
-        pl.col("lm_user_ids_list").str.split("|").alias("User_Id_List"),
-        pl.col("lm_ratings_list").str.split("|").alias("Rating_List")
-    ])
-
-    # Explode both lists simultaneously
-    df = df.explode(["User_Id_List", "Rating_List"])
-
-    # Cast to appropriate types
-    df = df.select([
-        pl.col("Movie_Name"),
-        pl.col("User_Id_List").cast(pl.Int64).alias("User_Id"),
-        pl.col("Rating_List").cast(pl.Float64).alias("Rating")
-    ])
-
-    # Count rows before deduplication
-    n_rows_raw = df.select(pl.len()).collect().item()
-
-    # Handle duplicates by averaging ratings for same user-movie pair
-    df = df.group_by(["User_Id", "Movie_Name"]).agg(pl.col("Rating").mean())
-
-    # Count rows after deduplication
-    n_rows_unique = df.select(pl.len()).collect().item()
-    n_duplicates = n_rows_raw - n_rows_unique
-    logger.info(f"Found {n_duplicates} duplicate user-movie entries (averaged)")
 
     # Filter by minimum rating if specified
     if min_rating is not None:
-        total_ratings = n_rows_unique
+        total_ratings = df.select(pl.len()).collect().item()
         df = df.filter(pl.col("Rating") >= min_rating)
         filtered_ratings = df.select(pl.len()).collect().item()
         removed_ratings = total_ratings - filtered_ratings
@@ -78,12 +43,8 @@ def create_user_movie_df(
         )
 
     # Create a dataframe with User_Id and list of Movie_Names they rated
-    user_movies_df = df.group_by("User_Id").agg(pl.col("Movie_Name").alias("movies_watched")).sort("User_Id")
-
-    # Take a subset if sample_size is specified
-    if sample_size is not None:
-        user_movies_df = user_movies_df.head(sample_size)
-
+    user_movies_df = df.group_by("User_Id").agg(pl.col("Movie_Name_Normalized")
+                                                .alias("movies_watched")).sort("User_Id")
     user_movies_df = user_movies_df.collect()
 
     # Save excluded user's movies before removing them
@@ -119,8 +80,6 @@ def find_frequent_itemsets(user_movies: dict, min_support: float = 0.25) -> pl.D
     """
     n_transactions = len(user_movies)
     min_count = int(min_support * n_transactions)
-
-    logger.info(f"Finding frequent itemsets with min_support={min_support} (min_count={min_count})")
 
     # Step 1: Count individual item frequencies across all transactions
     item_counts: dict[str, int] = {}
@@ -163,7 +122,8 @@ def find_frequent_itemsets(user_movies: dict, min_support: float = 0.25) -> pl.D
                 "length": ITEMSET_LENGTH_TWO
             })
 
-    logger.info(f"Found {sum(1 for d in itemsets_data if d['length'] == ITEMSET_LENGTH_TWO)} frequent 2-itemsets")
+    number_of_two_itemsets = sum(1 for d in itemsets_data if d["length"] == ITEMSET_LENGTH_TWO)
+    logger.info(f"""Found {number_of_two_itemsets} frequent 2-itemsets with {min_support=} ({min_count=})""")
 
     # Create DataFrame
     return pl.DataFrame(itemsets_data)
@@ -234,7 +194,7 @@ def generate_association_rules(
                     "lift": lift
                 })
 
-    logger.info(f"Generated {len(rules_data)} association rules")
+    logger.info(f"Generated {len(rules_data)} association rules with {min_confidence=}")
 
     if not rules_data:
         return pl.DataFrame({
@@ -355,12 +315,6 @@ def parse_args() -> argparse.Namespace:
 
     # Data parameters
     parser.add_argument(
-        "--sample-size",
-        type=int,
-        default=None,
-        help="Number of users to analyze (default: None = all users)"
-    )
-    parser.add_argument(
         "--min-rating",
         type=float,
         default=3.0,
@@ -429,7 +383,6 @@ if __name__ == "__main__":
     # Step 1: Load and prepare data
     logger.info("Creating user-movie dictionary from cleaned dataset")
     user_movies, test_user_movies = create_user_movie_df(
-        sample_size=args.sample_size,
         min_rating=args.min_rating,
         exclude_user=None if args.no_test_user else args.test_user_id
     )
@@ -487,6 +440,7 @@ if __name__ == "__main__":
             train_movies,
             rules_sorted
         )
+        logger.info(f"Generated {len(all_recommendations)} total recommendations for User {args.test_user_id}")
 
         if len(all_recommendations) > 0:
             # Show only top N to user
