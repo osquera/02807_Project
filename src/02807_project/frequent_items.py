@@ -12,20 +12,30 @@ DATA_PATH = DATA_LOCATION / "large_movie_dataset_clean.csv"
 # Constants
 ITEMSET_LENGTH_TWO = 2
 
+
 def create_user_movie_df(
     min_rating: float | None = None,
-    exclude_user: int | None = None
-) -> tuple[dict, list[str] | None]:
+    seed: int = 42,
+    min_movies_for_split: int = 20,
+    min_train_movies: int = 15,
+    train_ratio: float = 0.8,
+) -> tuple[dict[int, list[str]], dict[int, list[str]], set[int]]:
     """Create a dictionary mapping User_Id to list of movies they watched/rated.
+
+    Splits users' movies into train/test sets for evaluation.
 
     Args:
         min_rating: Minimum rating threshold to filter movies (None = include all)
-        exclude_user: User ID to exclude from the dataset (for testing)
+        seed: Random seed for train/test split
+        min_movies_for_split: Minimum movies a user must have to be included in split
+        min_train_movies: Minimum movies required in training set after split
+        train_ratio: Ratio of movies to use for training (e.g., 0.8 for 80/20 split)
 
     Returns:
-        Tuple of (user_movies_dict, excluded_user_movies)
-        - user_movies_dict: Dictionary with User_Id as keys and list of movie names as values
-        - excluded_user_movies: List of movies watched by excluded user (None if no user excluded)
+        Tuple of (train_user_movies, test_user_movies, qualifying_users)
+        - train_user_movies: Dict with User_Id -> list of training movies
+        - test_user_movies: Dict with User_Id -> list of test movies
+        - qualifying_users: Set of user IDs that have test data
 
     """
     df = pl.scan_csv(DATA_PATH, infer_schema=True)
@@ -47,21 +57,56 @@ def create_user_movie_df(
                                                 .alias("movies_watched")).sort("User_Id")
     user_movies_df = user_movies_df.collect()
 
-    # Save excluded user's movies before removing them
-    excluded_user_movies = None
-    if exclude_user is not None:
-        excluded_user_row = user_movies_df.filter(pl.col("User_Id") == exclude_user)
-        if len(excluded_user_row) > 0:
-            excluded_user_movies = excluded_user_row["movies_watched"][0]
-            logger.info(f"Saved {len(excluded_user_movies)} movies for excluded user {exclude_user}")
-        user_movies_df = user_movies_df.filter(pl.col("User_Id") != exclude_user)
-        logger.info(f"Excluded user {exclude_user} from training data")
+    logger.info(f"Creating train/test split for users with {min_movies_for_split}+ movies")
 
-    logger.info(f"Created user-movie dataframe with {len(user_movies_df)} unique users")
+    # Count movies per user
+    user_movies_df = user_movies_df.with_columns(
+        pl.col("movies_watched").list.len().alias("movie_count")
+    )
 
-    # Convert to dictionary
-    user_dict = dict(zip(user_movies_df["User_Id"], user_movies_df["movies_watched"], strict=True))
-    return user_dict, excluded_user_movies
+    # Mark qualifying users
+    qualifying_users_df = user_movies_df.filter(pl.col("movie_count") >= min_movies_for_split)
+    qualifying_user_ids = set(qualifying_users_df["User_Id"].to_list())
+
+    logger.info(f"Found {len(qualifying_user_ids)} users with {min_movies_for_split}+ movies")
+
+    train_user_movies: dict[int, list[str]] = {}
+    test_user_movies: dict[int, list[str]] = {}
+
+    for row in user_movies_df.iter_rows(named=True):
+        user_id = row["User_Id"]
+        movies = list(row["movies_watched"])
+        n_movies = len(movies)
+
+        if user_id not in qualifying_user_ids:
+            # Non-qualifying users: all movies go to training
+            train_user_movies[user_id] = movies
+            continue
+
+        # Shuffle with seed for reproducibility
+        random.seed(seed + user_id)
+        random.shuffle(movies)
+
+        n_train = int(n_movies * train_ratio)
+
+        # Ensure minimum train size
+        if n_train < min_train_movies:
+            n_train = min(min_train_movies, n_movies - 1)
+
+        # Skip if can't meet minimum requirements (put all in training)
+        if n_train < min_train_movies or n_movies - n_train < 1:
+            train_user_movies[user_id] = movies
+            continue
+
+        train_user_movies[user_id] = movies[:n_train]
+        test_user_movies[user_id] = movies[n_train:]
+
+    total_train_movies = sum(len(m) for m in train_user_movies.values())
+    total_test_movies = sum(len(m) for m in test_user_movies.values())
+    logger.info(f"Train/Test split complete: {total_train_movies} train movies, {total_test_movies} test movies")
+    logger.info(f"Test set: {len(test_user_movies)} users with held-out movies")
+
+    return train_user_movies, test_user_movies, qualifying_user_ids
 
 
 def find_frequent_itemsets(user_movies: dict, min_support: float = 0.25) -> pl.DataFrame:
@@ -246,7 +291,6 @@ def get_recommendations_for_movies(
                 })
 
     if not recommendations:
-        logger.info("No recommendations found for the given movies")
         return pl.DataFrame({"movie": [], "score": [], "count": []})
 
     # Create DataFrame and aggregate scores for movies recommended multiple times
@@ -260,24 +304,24 @@ def get_recommendations_for_movies(
 
 def evaluate_recommendations(
     test_movies: list[str],
-    recommendations: pl.DataFrame
+    recommendations: pl.DataFrame,
+    verbose: bool = True
 ) -> dict[str, float | int]:
     """Evaluate recommendation quality using test data.
 
     Args:
         test_movies: List of movies the user actually watched (ground truth)
         recommendations: DataFrame with recommended movies
+        verbose: Whether to log warnings
 
     Returns:
         Dictionary with evaluation metrics
 
     """
     if len(recommendations) == 0:
-        logger.warning("No recommendations to evaluate")
+        if verbose:
+            logger.warning("No recommendations to evaluate")
         return {
-            "precision": 0.0,
-            "recall": 0.0,
-            "f1": 0.0,
             "hits": 0,
             "total_recommendations": 0,
             "total_test_movies": len(test_movies)
@@ -290,20 +334,85 @@ def evaluate_recommendations(
     # Calculate hits (movies that were both recommended and in test set)
     hits = len(recommended_movies & test_movies_set)
 
-    # Calculate precision and recall
-    precision = hits / len(recommended_movies) if len(recommended_movies) > 0 else 0.0
-    recall = hits / len(test_movies_set) if len(test_movies_set) > 0 else 0.0
-
-    # Calculate F1 score
-    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
-
     return {
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
         "hits": hits,
         "total_recommendations": len(recommended_movies),
         "total_test_movies": len(test_movies_set)
+    }
+
+
+def evaluate_on_test_set(
+    train_user_movies: dict[int, list[str]],
+    test_user_movies: dict[int, list[str]],
+    rules: pl.DataFrame,
+) -> dict[str, float]:
+    """Evaluate association rules on test set across all test users.
+
+    Args:
+        train_user_movies: Dictionary mapping User_Id to list of training movies
+        test_user_movies: Dictionary mapping User_Id to list of test movies
+        rules: Association rules DataFrame
+        seed: Random seed for user sampling
+
+    Returns:
+        Dictionary with aggregated evaluation metrics
+
+    """
+    logger.info("Evaluating on test set...")
+
+    # Get test users and optionally sample
+    test_users = list(test_user_movies.keys())
+
+    logger.info(f"Evaluating {len(test_users)} test users")
+
+    users_with_recommendations = 0
+    total_hits = 0
+    total_recommendations = 0
+    total_test_movies = 0
+
+    for i, user_id in enumerate(test_users):
+        if (i + 1) % 10000 == 0:
+            logger.info(f"  Processed {i + 1}/{len(test_users)} users")
+
+        # Get user's training and test movies
+        train_movies = train_user_movies.get(user_id, [])
+        test_movies = test_user_movies.get(user_id, [])
+
+        if not train_movies or not test_movies:
+            continue
+
+        # Generate recommendations based on training movies
+        recommendations = get_recommendations_for_movies(train_movies, rules)
+
+        # Filter out movies already in training set
+        train_set = set(train_movies)
+        new_recommendations = recommendations.filter(
+            ~pl.col("movie").is_in(train_set)
+        )
+
+        if len(new_recommendations) == 0:
+            continue
+
+        # Evaluate
+        metrics = evaluate_recommendations(test_movies, new_recommendations, verbose=False)
+
+        if metrics["total_recommendations"] > 0:
+            users_with_recommendations += 1
+            total_hits += metrics["hits"]
+            total_recommendations += metrics["total_recommendations"]
+            total_test_movies += metrics["total_test_movies"]
+
+    # Calculate coverage
+    user_coverage = users_with_recommendations / len(test_users) if test_users else 0.0
+
+    # Aggregate metrics
+    return {
+        "user_coverage": user_coverage,
+        "users_evaluated": len(test_users),
+        "users_with_recommendations": users_with_recommendations,
+        "total_hits": total_hits,
+        "total_recommendations": total_recommendations,
+        "total_test_movies": total_test_movies,
     }
 
 
@@ -343,24 +452,7 @@ def parse_args() -> argparse.Namespace:
         help="Number of top rules to display (default: 10)"
     )
 
-    # Test case parameters
-    parser.add_argument(
-        "--test-user-id",
-        type=int,
-        default=1,
-        help="User ID to hold out for testing (default: 1)"
-    )
-    parser.add_argument(
-        "--top-recommendations",
-        type=int,
-        default=5,
-        help="Number of recommendations to generate for test user (default: 5)"
-    )
-    parser.add_argument(
-        "--no-test-user",
-        action="store_true",
-        help="Disable test user holdout"
-    )
+    # Train/test split parameters
     parser.add_argument(
         "--seed",
         type=int,
@@ -368,10 +460,22 @@ def parse_args() -> argparse.Namespace:
         help="Random seed for train/test split (default: 42)"
     )
     parser.add_argument(
-        "--train-fraction",
+        "--train-ratio",
         type=float,
         default=0.8,
-        help="Fraction of test user's movies to use for training (default: 0.8)"
+        help="Fraction of user's movies to use for training (default: 0.8)"
+    )
+    parser.add_argument(
+        "--min-movies-split",
+        type=int,
+        default=100,
+        help="Minimum movies for user to be in test split (default: 100)"
+    )
+    parser.add_argument(
+        "--min-train-movies",
+        type=int,
+        default=50,
+        help="Minimum movies required in training set (default: 50)"
     )
 
     return parser.parse_args()
@@ -380,16 +484,19 @@ def parse_args() -> argparse.Namespace:
 if __name__ == "__main__":
     args = parse_args()
 
-    # Step 1: Load and prepare data
-    logger.info("Creating user-movie dictionary from cleaned dataset")
-    user_movies, test_user_movies = create_user_movie_df(
+    # Step 1: Load and prepare data with train/test split
+    logger.info("Creating user-movie dictionary with train/test split")
+    train_user_movies, test_user_movies, qualifying_users = create_user_movie_df(
         min_rating=args.min_rating,
-        exclude_user=None if args.no_test_user else args.test_user_id
+        seed=args.seed,
+        min_movies_for_split=args.min_movies_split,
+        min_train_movies=args.min_train_movies,
+        train_ratio=args.train_ratio,
     )
 
-    # Step 2: Find frequent itemsets using Apriori algorithm
-    logger.info("Finding frequent itemsets")
-    itemsets = find_frequent_itemsets(user_movies, min_support=args.min_support)
+    # Step 2: Find frequent itemsets using Apriori algorithm on TRAINING data
+    logger.info("Finding frequent itemsets on training data")
+    itemsets = find_frequent_itemsets(train_user_movies, min_support=args.min_support)
 
     # Step 3: Generate association rules from frequent itemsets
     logger.info("Generating association rules")
@@ -407,66 +514,22 @@ if __name__ == "__main__":
     else:
         logger.info("No association rules found with current thresholds")
 
-    # Step 5: Test case - generate recommendations for held-out user
-    if test_user_movies is not None and len(rules) > 0:
-        logger.info(f"Test Case: Generating recommendations for User {args.test_user_id}")
-        logger.info(f"Test user watched {len(test_user_movies)} movies")
-
-        # Split user's movies into train and test for evaluation
-        n_movies = len(test_user_movies)
-        n_train = int(n_movies * args.train_fraction)
-
-        # Ensure at least one movie for training if we have movies
-        if n_train < 1 and n_movies > 0:
-            n_train = 1
-
-        if n_train < n_movies:
-            # Shuffle movies deterministically with seed
-            # Convert to list to ensure it's mutable for shuffling
-            movies_shuffled = list(test_user_movies)
-            random.seed(args.seed)
-            random.shuffle(movies_shuffled)
-
-            train_movies = movies_shuffled[:n_train]
-            eval_movies = movies_shuffled[n_train:]
-            logger.info(f"Split user's movies: {len(train_movies)} for input, {len(eval_movies)} for evaluation")
-        else:
-            train_movies = test_user_movies
-            eval_movies = []
-            logger.info(f"Using all {len(train_movies)} movies for input (too few to split)")
-
-        # Generate ALL recommendations based on TRAIN movies (for proper evaluation)
-        all_recommendations = get_recommendations_for_movies(
-            train_movies,
-            rules_sorted
+    # Step 5: Evaluate on test set
+    if test_user_movies and len(rules) > 0:
+        results = evaluate_on_test_set(
+            train_user_movies,
+            test_user_movies,
+            rules_sorted,
         )
-        logger.info(f"Generated {len(all_recommendations)} total recommendations for User {args.test_user_id}")
 
-        if len(all_recommendations) > 0:
-            # Show only top N to user
-            logger.info(f"Top {args.top_recommendations} recommendations for User {args.test_user_id}:")
-            logger.info(f"\n{all_recommendations.head(args.top_recommendations)}")
-
-            # Show which movies weren't in the train set (actual new recommendations)
-            train_watched = set(train_movies)
-            new_recs = all_recommendations.filter(
-                ~pl.col("movie").is_in(train_watched)
-            )
-            logger.info(f"New recommendations (not in training set): {len(new_recs)}")
-            if len(new_recs) > 0:
-                logger.info(f"\n{new_recs.head(args.top_recommendations)}")
-
-            # Evaluate against held-out movies if we have them
-            if len(eval_movies) > 0:
-                logger.info("\nEvaluating recommendations against held-out movies...")
-                logger.info(f"Using all new {len(new_recs)} recommendations for evaluation")
-                metrics = evaluate_recommendations(eval_movies, new_recs)
-                logger.info("Evaluation Metrics:")
-                logger.info(f"  Test movies: {metrics['total_test_movies']}")
-                logger.info(f"  Recommendations: {metrics['total_recommendations']}")
-                logger.info(f"  Hits: {metrics['hits']}")
-                logger.info(f"  Precision: {metrics['precision']:.3f}")
-                logger.info(f"  Recall: {metrics['recall']:.3f}")
-                logger.info(f"  F1 Score: {metrics['f1']:.3f}")
-        else:
-            logger.info("No recommendations could be generated for this user")
+        logger.info("EVALUATION RESULTS")
+        logger.info(f"Users evaluated: {results['users_evaluated']}")
+        logger.info(f"Users with recommendations: {results['users_with_recommendations']}")
+        logger.info(f"User coverage: {results['user_coverage']:.2%}")
+        logger.info(f"Total hits: {results['total_hits']}")
+        logger.info(f"Total recommendations: {results['total_recommendations']}")
+        logger.info(f"Total test movies: {results['total_test_movies']}")
+        logger.info(f"Precision: {results['total_hits'] / results['total_recommendations']:.2%}")
+        logger.info(f"Recall: {results['total_hits'] / results['total_test_movies']:.2%}")
+    else:
+        logger.warning("No test data or rules available for evaluation")
