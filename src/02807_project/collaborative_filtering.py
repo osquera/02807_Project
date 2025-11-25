@@ -11,6 +11,7 @@ from sklearn.preprocessing import normalize
 DATA_LOCATION = Path("data/clean")
 DATA_PATH = DATA_LOCATION / "large_movie_dataset_clean.csv"
 
+
 def load_ratings_data(
     min_rating: float | None = 0.0,
     exclude_user: int | None = None,
@@ -51,11 +52,11 @@ def load_ratings_data(
     # Collect the data
     # Ensure we have a long-format DataFrame (one row per rating)
     # Group by User_Id and Movie_Name to handle duplicates by averaging
-    df = df.select([
-        pl.col("User_Id"),
-        pl.col("Movie_Name_Normalized").alias("Movie_Name"),
-        pl.col("Rating")
-    ]).group_by(["User_Id", "Movie_Name"]).agg(pl.col("Rating").mean())
+    df = (
+        df.select([pl.col("User_Id"), pl.col("Movie_Name_Normalized").alias("Movie_Name"), pl.col("Rating")])
+        .group_by(["User_Id", "Movie_Name"])
+        .agg(pl.col("Rating").mean())
+    )
 
     ratings_df = df.collect()
 
@@ -254,7 +255,11 @@ def compute_item_similarity(
 
 
 def predict_rating(
-    user_ratings: dict[str, float], target_movie: str, similarities: dict[tuple[str, str], float], top_k: int = 20
+    user_ratings: dict[str, float],
+    target_movie: str,
+    similarities: dict[tuple[str, str], float],
+    top_k: int = 20,
+    movie_neighbors: dict[str, list[tuple[str, float]]] | None = None,
 ) -> float | None:
     """Predict rating for a target movie based on similar items the user has rated.
 
@@ -263,7 +268,7 @@ def predict_rating(
         target_movie: Movie to predict rating for
         similarities: Item-item similarity dictionary
         top_k: Number of most similar items to use for prediction
-        min_support: Minimum number of similar items required to make a prediction
+        movie_neighbors: Pre-computed mapping of movie -> list of (similar_movie, similarity) tuples (for speed)
 
     Returns:
         Predicted rating or None if prediction cannot be made
@@ -272,14 +277,22 @@ def predict_rating(
     # Find rated movies similar to target movie
     similar_items = []
 
-    for rated_movie, user_rating in user_ratings.items():
-        if rated_movie == target_movie:
-            continue
+    if movie_neighbors is not None:
+        # Fast path: Use pre-computed neighbors with similarity scores (no dict lookup needed)
+        similar_to_target = movie_neighbors.get(target_movie, [])
+        for rated_movie, sim in similar_to_target:
+            if rated_movie in user_ratings and sim > 0:
+                similar_items.append((rated_movie, user_ratings[rated_movie], sim))
+    else:
+        # Slow path: Iterate through all rated movies
+        for rated_movie, user_rating in user_ratings.items():
+            if rated_movie == target_movie:
+                continue
 
-        # Get similarity between target and rated movie
-        sim = similarities.get((target_movie, rated_movie))
-        if sim is not None and sim > 0:
-            similar_items.append((rated_movie, user_rating, sim))
+            # Get similarity between target and rated movie
+            sim = similarities.get((target_movie, rated_movie))
+            if sim is not None and sim > 0:
+                similar_items.append((rated_movie, user_rating, sim))
 
     if not similar_items:
         return None
@@ -303,6 +316,7 @@ def get_recommendations(
     similarities: dict[tuple[str, str], float],
     top_k_similar: int = 20,
     verbose: bool = True,
+    movie_neighbors: dict[str, list[tuple[str, float]]] | None = None,
 ) -> pl.DataFrame:
     """Generate top-N recommendations for a user.
 
@@ -311,6 +325,7 @@ def get_recommendations(
         similarities: Item-item similarity dictionary
         top_k_similar: Number of similar items to use for each prediction
         verbose: Whether to log progress messages
+        movie_neighbors: Pre-computed mapping of movie -> list of (similar_movie, similarity) tuples (for speed)
 
     Returns:
         DataFrame with recommended movies and predicted ratings
@@ -322,12 +337,20 @@ def get_recommendations(
     candidate_movies = set()
     rated_movies_set = set(user_ratings.keys())
 
-    # Iterate similarities keys to find neighbors of rated movies
-    for m1, m2 in similarities:
-        if m1 in rated_movies_set and m2 not in rated_movies_set:
-            candidate_movies.add(m2)
-        elif m2 in rated_movies_set and m1 not in rated_movies_set:
-            candidate_movies.add(m1)
+    if movie_neighbors is not None:
+        # Fast path: Use pre-computed neighbors
+        for rated_movie in rated_movies_set:
+            neighbors = movie_neighbors.get(rated_movie, [])
+            for neighbor, _ in neighbors:  # Unpack tuple, ignore similarity score here
+                if neighbor not in rated_movies_set:
+                    candidate_movies.add(neighbor)
+    else:
+        # Slow path: Iterate through all similarities (kept for backwards compatibility)
+        for m1, m2 in similarities:
+            if m1 in rated_movies_set and m2 not in rated_movies_set:
+                candidate_movies.add(m2)
+            elif m2 in rated_movies_set and m1 not in rated_movies_set:
+                candidate_movies.add(m1)
 
     if verbose:
         logger.info(f"Found {len(candidate_movies)} candidate movies based on similarity")
@@ -464,12 +487,25 @@ def evaluate_on_test_set(
     train_filtered = train_df.filter(pl.col("User_Id").is_in(test_users_list))
     test_filtered = test_df.filter(pl.col("User_Id").is_in(test_users_list))
 
-    # Create dictionaries: user_id -> DataFrame of ratings
-    # Note: group_by returns (key,) tuples, so we need to extract the first element
-    train_by_user = {key[0]: group for key, group in train_filtered.group_by("User_Id")}
-    test_by_user = {key[0]: group for key, group in test_filtered.group_by("User_Id")}
+    # Create dictionaries using partition_by (faster than group_by for this use case)
+    # partition_by returns list of DataFrames, one per group
+    train_partitions = train_filtered.partition_by("User_Id", as_dict=True)
+    test_partitions = test_filtered.partition_by("User_Id", as_dict=True)
+
+    # Extract the user_id from the tuple keys
+    train_by_user = {key[0]: df for key, df in train_partitions.items()}
+    test_by_user = {key[0]: df for key, df in test_partitions.items()}
 
     logger.info(f"Pre-grouping complete. Train groups: {len(train_by_user)}, Test groups: {len(test_by_user)}")
+
+    # Build inverted index: movie -> list of (similar_movie, similarity_score) tuples (for speed)
+    logger.info("Building movie similarity index with scores...")
+    movie_neighbors: dict[str, list[tuple[str, float]]] = {}
+    for (m1, m2), sim in similarities.items():
+        if m1 not in movie_neighbors:
+            movie_neighbors[m1] = []
+        movie_neighbors[m1].append((m2, sim))
+    logger.info(f"Similarity index built for {len(movie_neighbors)} movies")
 
     all_rmse = []
     all_mae = []
@@ -491,13 +527,24 @@ def evaluate_on_test_set(
         # Create user ratings dictionary
         user_ratings_dict = dict(zip(user_train["Movie_Name"], user_train["Rating"], strict=True))
 
-        # Generate predictions (suppress log messages for speed)
-        recommendations = get_recommendations(
-            user_ratings_dict, similarities, top_k_similar=top_k_similar, verbose=False
-        )
+        # Get test movies for this user (we only need to predict these)
+        test_movies = set(user_test["Movie_Name"].to_list())
 
-        if len(recommendations) == 0:
+        # Generate predictions ONLY for test movies
+        predictions = []
+        for test_movie in test_movies:
+            if test_movie not in user_ratings_dict:  # Don't predict movies already rated in training
+                predicted_rating = predict_rating(
+                    user_ratings_dict, test_movie, similarities, top_k=top_k_similar, movie_neighbors=movie_neighbors
+                )
+                if predicted_rating is not None:
+                    predictions.append({"movie": test_movie, "predicted_rating": predicted_rating})
+
+        if len(predictions) == 0:
             continue
+
+        # Create recommendations DataFrame
+        recommendations = pl.DataFrame(predictions).sort("predicted_rating", descending=True)
 
         # Evaluate
         metrics = evaluate_recommendations(
@@ -541,10 +588,12 @@ def parse_args() -> argparse.Namespace:
 
     # Train/test split parameters
     parser.add_argument("--test-split", action="store_true", help="Enable train/test split for evaluation")
-    parser.add_argument("--min-ratings-split", type=int, default=20, help="Min ratings for user to be in test split")
+    parser.add_argument("--min-ratings-split", type=int, default=100, help="Min ratings for user to be in test split")
     parser.add_argument("--min-train-ratings", type=int, default=15, help="Min ratings required in training set")
     parser.add_argument("--train-ratio", type=float, default=0.8, help="Train/test split ratio (default: 0.8)")
-    parser.add_argument("--max-test-users", type=int, default=50000, help="Max test users to evaluate (default: 50000)")
+    parser.add_argument(
+        "--max-test-users", type=int, default=500000, help="Max test users to evaluate (default: 50000)"
+    )
     parser.add_argument("--precision-k", type=int, default=10, help="K for Precision@K calculation")
     parser.add_argument("--relevant-threshold", type=float, default=4.0, help="Rating threshold for relevance")
 
@@ -677,7 +726,6 @@ if __name__ == "__main__":
 
             # Create user rating dictionary from TRAIN ratings
             user_ratings_dict = dict(zip(train_ratings["Movie_Name"], train_ratings["Rating"], strict=True))
-
 
             logger.info(f"Average rating: {train_ratings['Rating'].mean():.2f}")
 
