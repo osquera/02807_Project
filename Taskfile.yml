@@ -62,3 +62,7 @@ tasks:
     desc: Run collaborative filtering on merged dataset (pass args after --)
     cmds:
       - uv run python src/02807_project/collaborative_filtering.py {{.CLI_ARGS}}
+  run-visualize-similarities:
+    desc: Run visualization of movie similarities (pass args after --)
+    cmds:
+      - uv run python src/02807_project/visualize_similarities.py {{.CLI_ARGS}}
