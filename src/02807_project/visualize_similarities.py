@@ -1,6 +1,7 @@
 """Visualize movie similarity matrix for paper/presentation."""
 
 import argparse
+import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -104,8 +105,10 @@ def find_top_similar_pairs(
 
 
 def condense_movie_title(title: str) -> str:
-    """Condense long movie titles by adding newlines for better plot readability."""
-    return title.replace(":", ":\n").replace(" - ", " -\n").replace("(", "\n(").replace(",", ",\n")
+    # Remove text between parentheses (including the parentheses)
+    title = re.sub(r"\s*\([^)]*\)", "", title)
+    # Add newlines at colons, dashes, commas, and 'and'
+    return title.replace(":", ":\n").replace(" - ", " -\n").replace(",", ",\n").replace(" and ", " and\n")
 
 
 def plot_similarity_heatmap(movie_names: list[str], sim_matrix: np.ndarray, output_path: Path | None = None) -> None:
@@ -165,7 +168,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Visualize movie similarity matrix")
     parser.add_argument("--n-movies", type=int, default=5, help="Number of movies in cluster (default: 5)")
     parser.add_argument("--n-pairs", type=int, default=10, help="Number of top pairs to show (default: 10)")
-    parser.add_argument("--output", type=str, default=Path("data/analysis/"), help="Output path for heatmap (default: data/analysis/)")  # noqa: E501
+    parser.add_argument(
+        "--output", type=str, default=Path("data/analysis/"), help="Output path for heatmap (default: data/analysis/)"
+    )
     parser.add_argument("--min-common-users", type=int, default=100, help="Minimum common users for similarity")
     parser.add_argument("--min-similarity", type=float, default=0.0, help="Minimum similarity threshold (default: 0.0)")
     parser.add_argument("--min-rating", type=float, default=0.0, help="Minimum rating threshold")
