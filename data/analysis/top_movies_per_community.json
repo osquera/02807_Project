@@ -1,0 +1,548 @@
+{
+  "girvan_newman": {
+    "0": [
+      {
+        "movie": "Hamlet",
+        "degree": 2624,
+        "weighted_degree": 3099
+      },
+      {
+        "movie": "The Player",
+        "degree": 2709,
+        "weighted_degree": 3028
+      },
+      {
+        "movie": "The Three Musketeers",
+        "degree": 2471,
+        "weighted_degree": 2677
+      },
+      {
+        "movie": "Avengers: Endgame",
+        "degree": 1738,
+        "weighted_degree": 2107
+      },
+      {
+        "movie": "Harry Potter and the Deathly Hallows: Part 1",
+        "degree": 1403,
+        "weighted_degree": 1819
+      }
+    ],
+    "7": [
+      {
+        "movie": "God Tussi Great Ho",
+        "degree": 538,
+        "weighted_degree": 584
+      },
+      {
+        "movie": "Mohabbatein",
+        "degree": 503,
+        "weighted_degree": 549
+      },
+      {
+        "movie": "Veer-Zaara",
+        "degree": 492,
+        "weighted_degree": 532
+      },
+      {
+        "movie": "Paheli",
+        "degree": 474,
+        "weighted_degree": 504
+      },
+      {
+        "movie": "Jaan-E-Mann: Let's Fall in Love... Again",
+        "degree": 428,
+        "weighted_degree": 467
+      }
+    ]
+  },
+  "louvain": {
+    "0": [
+      {
+        "movie": "The Player",
+        "degree": 2709,
+        "weighted_degree": 3028
+      },
+      {
+        "movie": "Avengers: Endgame",
+        "degree": 1738,
+        "weighted_degree": 2107
+      },
+      {
+        "movie": "Pearl Harbor",
+        "degree": 1619,
+        "weighted_degree": 1720
+      },
+      {
+        "movie": "Independence Day",
+        "degree": 1486,
+        "weighted_degree": 1584
+      },
+      {
+        "movie": "Movie 43",
+        "degree": 1413,
+        "weighted_degree": 1564
+      }
+    ],
+    "1": [
+      {
+        "movie": "Beauty and the Beast",
+        "degree": 1101,
+        "weighted_degree": 1189
+      },
+      {
+        "movie": "Mars Attacks!",
+        "degree": 1109,
+        "weighted_degree": 1156
+      },
+      {
+        "movie": "The Lion King",
+        "degree": 879,
+        "weighted_degree": 1036
+      },
+      {
+        "movie": "The Ant Bully",
+        "degree": 937,
+        "weighted_degree": 1023
+      },
+      {
+        "movie": "Cats & Dogs",
+        "degree": 854,
+        "weighted_degree": 923
+      }
+    ],
+    "2": [
+      {
+        "movie": "1941",
+        "degree": 1159,
+        "weighted_degree": 1211
+      },
+      {
+        "movie": "The Calling",
+        "degree": 959,
+        "weighted_degree": 995
+      },
+      {
+        "movie": "Ten Little Indians",
+        "degree": 829,
+        "weighted_degree": 990
+      },
+      {
+        "movie": "Venom",
+        "degree": 945,
+        "weighted_degree": 962
+      },
+      {
+        "movie": "The Mummy",
+        "degree": 901,
+        "weighted_degree": 949
+      }
+    ],
+    "3": [
+      {
+        "movie": "Grindhouse",
+        "degree": 1599,
+        "weighted_degree": 1803
+      },
+      {
+        "movie": "Halloween",
+        "degree": 1547,
+        "weighted_degree": 1738
+      },
+      {
+        "movie": "Heat",
+        "degree": 1367,
+        "weighted_degree": 1464
+      },
+      {
+        "movie": "Hero",
+        "degree": 1379,
+        "weighted_degree": 1463
+      },
+      {
+        "movie": "Last Call",
+        "degree": 1364,
+        "weighted_degree": 1428
+      }
+    ],
+    "5": [
+      {
+        "movie": "The Three Musketeers",
+        "degree": 2471,
+        "weighted_degree": 2677
+      },
+      {
+        "movie": "Around the World in 80 Days",
+        "degree": 1652,
+        "weighted_degree": 1757
+      },
+      {
+        "movie": "How the West Was Won",
+        "degree": 1319,
+        "weighted_degree": 1476
+      },
+      {
+        "movie": "Midway",
+        "degree": 1404,
+        "weighted_degree": 1460
+      },
+      {
+        "movie": "The Sentinel",
+        "degree": 1328,
+        "weighted_degree": 1385
+      }
+    ],
+    "9": [
+      {
+        "movie": "Kung Fu Panda 2",
+        "degree": 839,
+        "weighted_degree": 893
+      },
+      {
+        "movie": "Kung Fu Panda 3",
+        "degree": 796,
+        "weighted_degree": 838
+      },
+      {
+        "movie": "The Protector",
+        "degree": 764,
+        "weighted_degree": 782
+      },
+      {
+        "movie": "Kung Fu Panda",
+        "degree": 620,
+        "weighted_degree": 654
+      },
+      {
+        "movie": "Rush Hour",
+        "degree": 599,
+        "weighted_degree": 609
+      }
+    ],
+    "16": [
+      {
+        "movie": "Paris, je t'aime",
+        "degree": 1150,
+        "weighted_degree": 1194
+      },
+      {
+        "movie": "One Hundred and One Nights",
+        "degree": 1108,
+        "weighted_degree": 1170
+      },
+      {
+        "movie": "Sahara",
+        "degree": 988,
+        "weighted_degree": 1083
+      },
+      {
+        "movie": "Heaven's Gate",
+        "degree": 1009,
+        "weighted_degree": 1044
+      },
+      {
+        "movie": "Ready to Wear",
+        "degree": 887,
+        "weighted_degree": 922
+      }
+    ],
+    "20": [
+      {
+        "movie": "The Great Gatsby",
+        "degree": 1217,
+        "weighted_degree": 1266
+      },
+      {
+        "movie": "Victory",
+        "degree": 835,
+        "weighted_degree": 853
+      },
+      {
+        "movie": "Brothers",
+        "degree": 717,
+        "weighted_degree": 745
+      },
+      {
+        "movie": "Silver Linings Playbook",
+        "degree": 626,
+        "weighted_degree": 643
+      },
+      {
+        "movie": "Happy New Year",
+        "degree": 572,
+        "weighted_degree": 591
+      }
+    ],
+    "26": [
+      {
+        "movie": "Darling",
+        "degree": 411,
+        "weighted_degree": 414
+      },
+      {
+        "movie": "Late Phases",
+        "degree": 285,
+        "weighted_degree": 289
+      },
+      {
+        "movie": "We Are What We Are",
+        "degree": 267,
+        "weighted_degree": 271
+      },
+      {
+        "movie": "Session 9",
+        "degree": 265,
+        "weighted_degree": 266
+      },
+      {
+        "movie": "Chinese Puzzle",
+        "degree": 201,
+        "weighted_degree": 206
+      }
+    ],
+    "29": [
+      {
+        "movie": "Hamlet",
+        "degree": 2624,
+        "weighted_degree": 3099
+      },
+      {
+        "movie": "Harry Potter and the Deathly Hallows: Part 1",
+        "degree": 1403,
+        "weighted_degree": 1819
+      },
+      {
+        "movie": "A Midsummer Night's Dream",
+        "degree": 1583,
+        "weighted_degree": 1680
+      },
+      {
+        "movie": "Harry Potter and the Deathly Hallows: Part 2",
+        "degree": 1243,
+        "weighted_degree": 1610
+      },
+      {
+        "movie": "Hercules",
+        "degree": 1498,
+        "weighted_degree": 1580
+      }
+    ],
+    "30": [
+      {
+        "movie": "Derailed",
+        "degree": 529,
+        "weighted_degree": 537
+      },
+      {
+        "movie": "Quick",
+        "degree": 347,
+        "weighted_degree": 349
+      },
+      {
+        "movie": "One on One",
+        "degree": 148,
+        "weighted_degree": 150
+      },
+      {
+        "movie": "Parasite",
+        "degree": 114,
+        "weighted_degree": 116
+      },
+      {
+        "movie": "Minari",
+        "degree": 115,
+        "weighted_degree": 115
+      }
+    ]
+  },
+  "fast_spectral": {
+    "4": [
+      {
+        "movie": "The Killer",
+        "degree": 216,
+        "weighted_degree": 216
+      },
+      {
+        "movie": "Provoked: A True Story",
+        "degree": 203,
+        "weighted_degree": 208
+      },
+      {
+        "movie": "Twin Dragons",
+        "degree": 175,
+        "weighted_degree": 182
+      },
+      {
+        "movie": "Queen Margot",
+        "degree": 176,
+        "weighted_degree": 181
+      },
+      {
+        "movie": "Glitter",
+        "degree": 179,
+        "weighted_degree": 181
+      }
+    ],
+    "0": [
+      {
+        "movie": "Hamlet",
+        "degree": 2624,
+        "weighted_degree": 3099
+      },
+      {
+        "movie": "The Player",
+        "degree": 2709,
+        "weighted_degree": 3028
+      },
+      {
+        "movie": "The Three Musketeers",
+        "degree": 2471,
+        "weighted_degree": 2677
+      },
+      {
+        "movie": "Avengers: Endgame",
+        "degree": 1738,
+        "weighted_degree": 2107
+      },
+      {
+        "movie": "Harry Potter and the Deathly Hallows: Part 1",
+        "degree": 1403,
+        "weighted_degree": 1819
+      }
+    ],
+    "6": [
+      {
+        "movie": "Alexander the Great",
+        "degree": 413,
+        "weighted_degree": 441
+      },
+      {
+        "movie": "Official Secrets",
+        "degree": 380,
+        "weighted_degree": 408
+      },
+      {
+        "movie": "High-Rise",
+        "degree": 389,
+        "weighted_degree": 405
+      },
+      {
+        "movie": "Friday",
+        "degree": 372,
+        "weighted_degree": 405
+      },
+      {
+        "movie": "Broadcast News",
+        "degree": 388,
+        "weighted_degree": 404
+      }
+    ],
+    "9": [
+      {
+        "movie": "Isn't It Romantic",
+        "degree": 150,
+        "weighted_degree": 153
+      },
+      {
+        "movie": "The Song of Scorpions",
+        "degree": 116,
+        "weighted_degree": 116
+      },
+      {
+        "movie": "The Warrior",
+        "degree": 107,
+        "weighted_degree": 107
+      },
+      {
+        "movie": "Slumdog Millionaire",
+        "degree": 103,
+        "weighted_degree": 103
+      },
+      {
+        "movie": "Such a Long Journey",
+        "degree": 88,
+        "weighted_degree": 88
+      }
+    ],
+    "5": [
+      {
+        "movie": "The Great Gatsby",
+        "degree": 1217,
+        "weighted_degree": 1266
+      },
+      {
+        "movie": "Victory",
+        "degree": 835,
+        "weighted_degree": 853
+      },
+      {
+        "movie": "You Will Meet a Tall Dark Stranger",
+        "degree": 752,
+        "weighted_degree": 771
+      },
+      {
+        "movie": "Brothers",
+        "degree": 717,
+        "weighted_degree": 745
+      },
+      {
+        "movie": "Silver Linings Playbook",
+        "degree": 626,
+        "weighted_degree": 643
+      }
+    ],
+    "3": [
+      {
+        "movie": "Happy New Year",
+        "degree": 572,
+        "weighted_degree": 591
+      },
+      {
+        "movie": "God Tussi Great Ho",
+        "degree": 538,
+        "weighted_degree": 584
+      },
+      {
+        "movie": "Baby",
+        "degree": 543,
+        "weighted_degree": 566
+      },
+      {
+        "movie": "Mohabbatein",
+        "degree": 503,
+        "weighted_degree": 549
+      },
+      {
+        "movie": "Veer-Zaara",
+        "degree": 492,
+        "weighted_degree": 532
+      }
+    ],
+    "1": [
+      {
+        "movie": "Sye Raa Narasimha Reddy",
+        "degree": 352,
+        "weighted_degree": 358
+      },
+      {
+        "movie": "Nannbenda",
+        "degree": 120,
+        "weighted_degree": 121
+      },
+      {
+        "movie": "Action",
+        "degree": 118,
+        "weighted_degree": 120
+      },
+      {
+        "movie": "Imaikkaa Nodigal",
+        "degree": 114,
+        "weighted_degree": 116
+      },
+      {
+        "movie": "Naanum Rowdy Thaan",
+        "degree": 114,
+        "weighted_degree": 116
+      }
+    ]
+  }
+}
