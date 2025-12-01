@@ -12,6 +12,7 @@ Performs community detection using:
 Generates visualizations and comparison statistics.
 """
 
+import argparse
 import json
 import math
 import random
@@ -38,11 +39,12 @@ MIN_SHARED_ACTORS = 1  # Minimum shared actors to create an edge
 MIN_COMMUNITY_SIZE = 100  # Minimum community size to show in visualizations
 
 
-def load_actor_film_data(use_merged: bool = False) -> pl.DataFrame:
+def load_actor_film_data(use_merged: bool = False, subset_size: int | None = None) -> pl.DataFrame:
     """Load actor-film relationships.
 
     Args:
         use_merged: If True, load from merged dataset. Otherwise from actorfilms_clean.csv
+        subset_size: If provided, randomly sample this many unique films
 
     Returns:
         DataFrame with Film and Actor columns
@@ -74,22 +76,33 @@ def load_actor_film_data(use_merged: bool = False) -> pl.DataFrame:
                     if actor:
                         actor_films.extend([{"Film": film, "Actor": actor.strip()}])
 
-        return pl.DataFrame(actor_films)
+        df = pl.DataFrame(actor_films)
 
-    path = CLEAN_LOCATION / "actorfilms_clean.csv"
-    if not path.exists():
-        msg = f"Actor films dataset not found at {path}"
-        raise FileNotFoundError(msg)
+    else:
+        path = CLEAN_LOCATION / "actorfilms_clean.csv"
+        if not path.exists():
+            msg = f"Actor films dataset not found at {path}"
+            raise FileNotFoundError(msg)
 
-    df = pl.read_csv(
-        path,
-        schema_overrides={
-            "Actor": pl.Utf8,
-            "Film": pl.Utf8,
-        },
-    )
+        df = pl.read_csv(
+            path,
+            schema_overrides={
+                "Actor": pl.Utf8,
+                "Film": pl.Utf8,
+            },
+        )
 
-    return df.select(["Film", "Actor"])
+    df = df.select(["Film", "Actor"])
+
+    # Apply subset if requested
+    if subset_size is not None:
+        unique_films = df.select("Film").unique()
+        if len(unique_films) > subset_size:
+            sampled_films = unique_films.sample(n=subset_size, seed=42).to_series().to_list()
+            df = df.filter(pl.col("Film").is_in(sampled_films))
+            logger.info(f"   Subset to {subset_size} films: {len(df)} actor-film relationships")
+
+    return df
 
 
 def build_movie_coactor_graph(actor_film_df: pl.DataFrame) -> nx.Graph:
@@ -560,12 +573,14 @@ def calculate_null_model_modularity(random_graphs: list[nx.Graph], communities: 
 def visualize_network(
     G: nx.Graph,  # noqa: N803
     max_nodes: int | None = None,
+    display: bool = False,
 ) -> None:
     """Visualize the network graph without community coloring.
 
     Args:
         G: NetworkX graph
         max_nodes: Maximum nodes to visualize (for performance), None for full network
+        display: If True, display plot instead of saving
 
     """
     logger.info("📊 Visualizing network graph...")
@@ -601,12 +616,16 @@ def visualize_network(
     # Compact layout
     plt.tight_layout()
 
-    # Save
-    output_path = ANALYSIS_LOCATION / "network_graph.png"
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close()
-
-    logger.info(f"   Saved network visualization to {output_path}")
+    if display:
+        # Display in notebook
+        plt.show()
+        logger.info("   Displayed network visualization")
+    else:
+        # Save
+        output_path = ANALYSIS_LOCATION / "network_graph.png"
+        plt.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close()
+        logger.info(f"   Saved network visualization to {output_path}")
 
 
 def visualize_communities(
@@ -615,6 +634,7 @@ def visualize_communities(
     method_name: str,
     max_nodes: int | None = None,
     min_community_size: int = 100,
+    display: bool = False,
 ) -> None:
     """Visualize the graph with community coloring.
 
@@ -624,6 +644,7 @@ def visualize_communities(
         method_name: Name of the clustering method
         max_nodes: Maximum nodes to visualize (for performance), None for full network
         min_community_size: Minimum community size to label in visualization
+        display: If True, display plot instead of saving
 
     """
     logger.info(f"📊 Visualizing {method_name} communities...")
@@ -721,12 +742,16 @@ def visualize_communities(
     # Compact layout for LaTeX reports
     plt.subplots_adjust(right=0.82, left=0.02, top=0.96, bottom=0.02)
 
-    # Save
-    output_path = ANALYSIS_LOCATION / f"communities_{method_name.lower().replace(' ', '_')}.png"
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close()
-
-    logger.info(f"   Saved visualization to {output_path}")
+    if display:
+        # Display in notebook
+        plt.show()
+        logger.info(f"   Displayed communities visualization for {method_name}")
+    else:
+        # Save
+        output_path = ANALYSIS_LOCATION / f"communities_{method_name.lower().replace(' ', '_')}.png"
+        plt.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close()
+        logger.info(f"   Saved visualization to {output_path}")
 
 
 def analyze_communities(G: nx.Graph, communities: dict, method_name: str) -> dict:  # noqa: N803
@@ -818,13 +843,16 @@ def get_top_movies_per_community(G: nx.Graph, communities: dict, top_n: int = 5,
     return top_movies
 
 
-def visualize_top_movies_per_community(top_movies: dict, method_name: str, max_communities: int = 10) -> None:
+def visualize_top_movies_per_community(
+    top_movies: dict, method_name: str, max_communities: int = 10, display: bool = False
+) -> None:
     """Visualize the top movies per community as a table/chart.
 
     Args:
         top_movies: Dictionary from get_top_movies_per_community
         method_name: Name of the clustering method
         max_communities: Maximum number of communities to visualize
+        display: If True, display plot instead of saving
 
     """
     logger.info(f"📊 Visualizing top movies for {method_name}...")
@@ -834,6 +862,10 @@ def visualize_top_movies_per_community(top_movies: dict, method_name: str, max_c
 
     # Create figure with subplots
     n_communities = len(sorted_communities)
+    if n_communities == 0:
+        logger.info("No communities to visualize")
+        return
+
     _fig, axes = plt.subplots(n_communities, 1, figsize=(16, 4 * n_communities))
 
     if n_communities == 1:
@@ -879,12 +911,16 @@ def visualize_top_movies_per_community(top_movies: dict, method_name: str, max_c
     plt.suptitle(f"Top Connected Movies per Community - {method_name}", fontsize=16, y=0.995)
     plt.tight_layout()
 
-    # Save
-    output_path = ANALYSIS_LOCATION / f"top_movies_{method_name.lower().replace(' ', '_')}.png"
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close()
-
-    logger.info(f"   Saved visualization to {output_path}")
+    if display:
+        # Display in notebook
+        plt.show()
+        logger.info(f"   Displayed top movies visualization for {method_name}")
+    else:
+        # Save
+        output_path = ANALYSIS_LOCATION / f"top_movies_{method_name.lower().replace(' ', '_')}.png"
+        plt.savefig(output_path, dpi=150, bbox_inches="tight")
+        plt.close()
+        logger.info(f"   Saved visualization to {output_path}")
 
 
 def save_results(
@@ -1004,10 +1040,17 @@ def save_results(
 
 def main() -> None:
     """Analyze pipeline."""
+    parser = argparse.ArgumentParser(description="Analyze movie network based on shared actors")
+    parser.add_argument("--subset-size", type=int, help="Number of films to randomly sample for analysis")
+    parser.add_argument("--display-plots", action="store_true", help="Display plots instead of saving to files")
+    args = parser.parse_args()
+
+
+    display_plots = args.display_plots
     logger.info("🚀 Starting actor network analysis...")
 
     # Load data
-    actor_film_df = load_actor_film_data(use_merged=USE_MERGED_DATASET)
+    actor_film_df = load_actor_film_data(use_merged=USE_MERGED_DATASET, subset_size=args.subset_size)
     logger.info(f"   Loaded {len(actor_film_df)} actor-film relationships")
 
     # Build graph
@@ -1069,14 +1112,24 @@ def main() -> None:
 
     # Visualize the network (sample 10% for performance)
     sample_size = max(1000, G.number_of_nodes() // 10)
-    visualize_network(G, max_nodes=sample_size)
+    visualize_network(G, max_nodes=sample_size, display=display_plots)
 
     # Visualize communities (sample 10% for performance)
     visualize_communities(
-        G, gn_communities, "Girvan-Newman", max_nodes=sample_size, min_community_size=MIN_COMMUNITY_SIZE
+        G,
+        gn_communities,
+        "Girvan-Newman",
+        max_nodes=sample_size,
+        min_community_size=MIN_COMMUNITY_SIZE,
+        display=display_plots,
     )
     visualize_communities(
-        G, louvain_communities, "Louvain", max_nodes=sample_size, min_community_size=MIN_COMMUNITY_SIZE
+        G,
+        louvain_communities,
+        "Louvain",
+        max_nodes=sample_size,
+        min_community_size=MIN_COMMUNITY_SIZE,
+        display=display_plots,
     )
     # visualize_communities(
     #     G, spectral_communities, "Spectral Clustering", max_nodes=sample_size, min_community_size=MIN_COMMUNITY_SIZE
@@ -1087,12 +1140,15 @@ def main() -> None:
         "Fast Spectral Clustering",
         max_nodes=sample_size,
         min_community_size=MIN_COMMUNITY_SIZE,
+        display=display_plots,
     )
 
     # Visualize top movies per community
-    visualize_top_movies_per_community(gn_top_movies, "Girvan-Newman", max_communities=10)
-    visualize_top_movies_per_community(louvain_top_movies, "Louvain", max_communities=10)
-    visualize_top_movies_per_community(fast_spectral_top_movies, "Fast Spectral Clustering", max_communities=10)
+    visualize_top_movies_per_community(gn_top_movies, "Girvan-Newman", max_communities=10, display=display_plots)
+    visualize_top_movies_per_community(louvain_top_movies, "Louvain", max_communities=10, display=display_plots)
+    visualize_top_movies_per_community(
+        fast_spectral_top_movies, "Fast Spectral Clustering", max_communities=10, display=display_plots
+    )
 
     # Save results
     # save_results(G, gn_communities, louvain_communities, spectral_communities, fast_spectral_communities, all_stats)

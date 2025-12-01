@@ -66,3 +66,7 @@ tasks:
     desc: Run visualization of movie similarities (pass args after --)
     cmds:
       - uv run python src/02807_project/visualize_similarities.py {{.CLI_ARGS}}
+  run-graph-analysis-subset:
+    desc: Run graph analysis on a subset of data for quick notebook demos
+    cmds:
+      - uv run python src/02807_project/analyze_actor_network.py --subset-size 5000
