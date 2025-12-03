@@ -1,5 +1,32 @@
 # 02807 Project
 
+## Quick Start with Demo Notebook
+
+The easiest way to explore this project is through our interactive demo notebook:
+
+**📓 [project_demo.ipynb](project_demo.ipynb)**
+
+This Jupyter notebook demonstrates the complete data pipeline and analysis methods, including:
+- Data download and cleaning
+- Web scraping from Rotten Tomatoes
+- Frequent itemset analysis
+- Graph-based community detection
+- Collaborative filtering with similarity visualization
+
+### Running the Demo Notebook
+
+1. **Install dependencies:**
+   ```bash
+   task sync
+   ```
+
+2. **Open the notebook:**
+   - Open `project_demo.ipynb` in VS Code with the Jupyter extension, or
+   - Launch Jupyter Notebook/Lab: `jupyter notebook project_demo.ipynb`
+
+3. **Run cells sequentially** to see the full pipeline in action
+
+The notebook includes both full analysis commands and quick subset-based demos that run in minutes instead of hours.
 
 ## Taskfile Installation
 
