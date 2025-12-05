@@ -12,6 +12,7 @@ dependencies = [
     "matplotlib>=3.10.7",
     "networkx>=3.5",
     "numpy>=2.3.4",
+    "openai>=2.9.0",
     "pandas>=2.3.3",
     "pyamg>=5.3.0",
     "scikit-learn>=1.7.2",
