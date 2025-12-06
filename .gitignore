@@ -10,7 +10,7 @@ src/02807_project/data/raw/*.csv
 venv/
 .venv/
 *.pyc
-*.lock
+
 # macOS files
 .DS_Store
 # IDE files
